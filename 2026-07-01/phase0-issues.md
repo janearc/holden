@@ -1,7 +1,17 @@
-# Phase 0 Issues — Staged, Net +7 (Section 10 discovery-sprint exemption)
+# Phase 0 Issues — FILED, Net +7 (Section 10 discovery-sprint exemption)
 
-Status: STAGED, not yet filed to GitHub. All to be assigned to `janearc` per Section 10.
-None fixed inline — Phase 0 records, does not fix, per Section 6.
+Status: FILED 2026-07-01, all assigned to `janearc`. None fixed inline — Phase 0 records,
+does not fix, per Section 6.
+
+| # | Repo | Issue |
+|---|------|-------|
+| 1 | big-little-mesh | [#74](https://github.com/janearc/big-little-mesh/issues/74) |
+| 2 | magpie | [#20](https://github.com/janearc/magpie/issues/20) |
+| 3 | big-little-mesh | [#75](https://github.com/janearc/big-little-mesh/issues/75) |
+| 4 | big-little-mesh | [#76](https://github.com/janearc/big-little-mesh/issues/76) |
+| 5 | big-little-mesh | [#77](https://github.com/janearc/big-little-mesh/issues/77) |
+| 6 | wonderlib | [#1](https://github.com/janearc/wonderlib/issues/1) |
+| 7 | magpie | [#21](https://github.com/janearc/magpie/issues/21) |
 
 Repo name mapping (on disk -> GitHub): `kafka-logging` = `janearc/kafka-svc`.
 

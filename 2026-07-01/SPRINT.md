@@ -619,9 +619,9 @@ Round 5 — resolved (Max + Sonnet 5, from Phase 0 execution):
 - 4.3: wonderlib surface CONFIRMED against source; UNVERIFIED markers flipped throughout;
   Pin note added — wire against the published repo pinned to a revision, not the four
   divergent copies. heuristic-only -> heuristic-by-default. (0/4.3/6)
-- Phase 0 delta: +7 issues STAGED in phase0-issues-to-file.md (NOT yet filed to GitHub —
-  pending Max's go), net stated per Section 10's discovery-sprint exemption. None fixed
-  inline, per Section 6.
+- Phase 0 delta: +7 issues FILED (assigned janearc) — big-little-mesh #74/#75/#76/#77,
+  magpie #20/#21, wonderlib #1. Record: 2026-07-01/phase0-issues.md. Net +7 per Section
+  10's discovery-sprint exemption; none fixed inline, per Section 6.
 
 Merge notes (Claude, honesty): applied against the on-disk canonical copy
 (~/.claude/sprint-2026-07-01-fix-coding-process.md). Sonnet's Round 5 OLD strings targeted
