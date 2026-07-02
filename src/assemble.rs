@@ -1,0 +1,293 @@
+// assemble.rs — input assembly (ADR-0001 D6): everything the judge receives,
+// gathered as explicit artifacts. the judge is never fed the writer's session;
+// it gets exactly what this module returns and nothing else.
+//
+// subprocess seams (gh, rg) are isolated in run(); the diff-parsing logic is
+// pure and unit-tested. network/API failures are loud errors — the harness
+// fails closed, it never rules on partial inputs.
+
+use anyhow::{bail, Context, Result};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+// pilot-scope roster for the consumer scan: the registration-seam repos plus
+// the fleet repos that vendor generated contract types. post-pilot this reads
+// the fleet's WorkstationConfig instead of a constant — recorded as a pilot
+// boundary in the sprint doc, not a shortcut: the pilot binds one seam.
+const PILOT_ROSTER: &[&str] = &[
+    "big-little-mesh",
+    "delightd",
+    "magpie",
+    "kafka-logging",
+    "obs-svc",
+    "taco",
+    "paling",
+];
+
+#[derive(Debug)]
+pub struct Inputs {
+    pub repo_name: String,
+    pub pr_number: u64,
+    pub head_sha: String,
+    pub diff: String,
+    // (path, contents) pairs; paths are repo-relative where possible.
+    pub design_docs: Vec<(PathBuf, String)>,
+    pub contracts_touched: Vec<(PathBuf, String)>,
+    // prior rulings, oldest first: the judge's only persistent memory.
+    pub ledger: Vec<(PathBuf, String)>,
+    pub consumers: Vec<ConsumerHit>,
+}
+
+#[derive(Debug)]
+pub struct ConsumerHit {
+    pub message: String,
+    // "<repo>/<path>:<line>: <text>" — already citation-shaped for the ruling.
+    pub citation: String,
+}
+
+// run a subprocess and capture stdout; stderr becomes the error context.
+fn run(cmd: &mut Command) -> Result<String> {
+    let out = cmd.output().with_context(|| format!("spawning {:?}", cmd))?;
+    if !out.status.success() {
+        bail!(
+            "{:?} failed ({}): {}",
+            cmd,
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+pub fn assemble(
+    repo_path: &Path,
+    pr_number: u64,
+    work_root: &Path,
+    sprints_root: &Path,
+) -> Result<Inputs> {
+    let repo_name = repo_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .context("repo path has no basename")?
+        .to_string();
+
+    // head sha + diff come from gh, scoped to the repo checkout.
+    let head_sha = run(Command::new("gh")
+        .args([
+            "pr", "view", &pr_number.to_string(),
+            "--json", "headRefOid", "-q", ".headRefOid",
+        ])
+        .current_dir(repo_path))?
+    .trim()
+    .to_string();
+    if head_sha.is_empty() {
+        bail!("could not resolve head sha for PR {pr_number}");
+    }
+
+    let diff = run(Command::new("gh")
+        .args(["pr", "diff", &pr_number.to_string()])
+        .current_dir(repo_path))?;
+    if diff.trim().is_empty() {
+        bail!("PR {pr_number} has an empty diff; nothing to rule on");
+    }
+
+    // design docs: the repo's docs/ tree plus root-level DESIGN/VISION files.
+    // the judge rules against the design as committed, not as remembered.
+    let mut design_docs = Vec::new();
+    for name in ["DESIGN.md", "VISION.md"] {
+        let p = repo_path.join(name);
+        if let Ok(s) = std::fs::read_to_string(&p) {
+            design_docs.push((PathBuf::from(name), s));
+        }
+    }
+    let docs_dir = repo_path.join("docs");
+    if docs_dir.is_dir() {
+        let mut entries: Vec<_> = std::fs::read_dir(&docs_dir)
+            .with_context(|| format!("reading {}", docs_dir.display()))?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "md"))
+            .collect();
+        entries.sort();
+        for p in entries {
+            let rel = PathBuf::from("docs").join(p.file_name().unwrap());
+            let s = std::fs::read_to_string(&p)
+                .with_context(|| format!("reading {}", p.display()))?;
+            design_docs.push((rel, s));
+        }
+    }
+    if design_docs.is_empty() {
+        // a repo with no design artifact cannot be judged for design
+        // conformance; that is a finding, not a default-pass.
+        bail!("{repo_name} has no design docs (docs/*.md, DESIGN.md, VISION.md); T3 cannot run without a design artifact");
+    }
+
+    // contract files touched by this diff, with their full current contents.
+    let mut contracts_touched = Vec::new();
+    for rel in changed_paths(&diff) {
+        if rel.ends_with(".proto") {
+            let p = repo_path.join(&rel);
+            // a deleted proto still matters; record its absence explicitly.
+            let contents = std::fs::read_to_string(&p)
+                .unwrap_or_else(|_| "(file deleted in this diff)".to_string());
+            contracts_touched.push((PathBuf::from(rel), contents));
+        }
+    }
+
+    // the ledger: every prior ruling across all sprint dirs, oldest first.
+    let mut ledger = Vec::new();
+    let mut sprint_dirs: Vec<_> = std::fs::read_dir(sprints_root)
+        .with_context(|| format!("reading {}", sprints_root.display()))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_dir() && p.join("rulings").is_dir())
+        .collect();
+    sprint_dirs.sort();
+    for sd in sprint_dirs {
+        let mut rulings: Vec<_> = std::fs::read_dir(sd.join("rulings"))?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "yaml" || x == "yml"))
+            .collect();
+        rulings.sort();
+        for p in rulings {
+            let s = std::fs::read_to_string(&p)?;
+            ledger.push((p, s));
+        }
+    }
+
+    // consumer scan: for every message type named in touched proto hunks,
+    // rg the roster (excluding the repo under judgment) for uses. hits come
+    // back citation-shaped so the judge can cite rather than assert.
+    let mut consumers = Vec::new();
+    for msg in changed_proto_messages(&diff) {
+        for other in PILOT_ROSTER.iter().filter(|r| **r != repo_name) {
+            let dir = work_root.join(other);
+            if !dir.is_dir() {
+                continue;
+            }
+            // rg exits 1 on no-matches; that is not an error here.
+            let out = Command::new("rg")
+                .args(["-n", "--no-heading", "-w", &msg])
+                .args(["-g", "!*.pb.go", "-g", "!*_pb2.py*", "-g", "!gen/**", "-g", "!vendor/**", "-g", "!.venv/**"])
+                .arg(".")
+                .current_dir(&dir)
+                .output()
+                .with_context(|| format!("rg in {}", dir.display()))?;
+            if out.status.code() == Some(0) {
+                for line in String::from_utf8_lossy(&out.stdout).lines().take(20) {
+                    consumers.push(ConsumerHit {
+                        message: msg.clone(),
+                        citation: format!("{other}/{line}"),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(Inputs {
+        repo_name,
+        pr_number,
+        head_sha,
+        diff,
+        design_docs,
+        contracts_touched,
+        ledger,
+        consumers,
+    })
+}
+
+// pure: repo-relative paths this unified diff touches ("+++ b/<path>").
+pub fn changed_paths(diff: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in diff.lines() {
+        if let Some(rest) = line.strip_prefix("+++ b/") {
+            out.push(rest.trim().to_string());
+        }
+    }
+    out
+}
+
+// pure: protobuf message names appearing in the diff's proto hunks. scans
+// added/removed/context lines for `message <Name> {` — cheap and sufficient
+// for the consumer scan; the authoritative breaking check is buf's job (T2),
+// not this scan's.
+pub fn changed_proto_messages(diff: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut in_proto = false;
+    for line in diff.lines() {
+        if let Some(rest) = line.strip_prefix("+++ b/") {
+            in_proto = rest.trim().ends_with(".proto");
+            continue;
+        }
+        if !in_proto {
+            continue;
+        }
+        let body = line
+            .strip_prefix('+')
+            .or_else(|| line.strip_prefix('-'))
+            .or_else(|| line.strip_prefix(' '))
+            .unwrap_or(line)
+            .trim_start();
+        if let Some(rest) = body.strip_prefix("message ") {
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() && !out.contains(&name) {
+                out.push(name);
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FAKE_DIFF: &str = r#"diff --git a/proto/registry/v1/register.proto b/proto/registry/v1/register.proto
+--- a/proto/registry/v1/register.proto
++++ b/proto/registry/v1/register.proto
+@@ -10,6 +10,8 @@
+ message Registration {
+   string project_name = 1;
++  string flavor = 2;
+ }
++message NotRegistered {
++  string reason = 1;
++}
+diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
+--- a/pkg/httpapi/register.go
++++ b/pkg/httpapi/register.go
+@@ -1,3 +1,4 @@
++// message handling for registration
+ package httpapi
+"#;
+
+    #[test]
+    fn changed_paths_finds_both_files() {
+        let paths = changed_paths(FAKE_DIFF);
+        assert_eq!(
+            paths,
+            vec![
+                "proto/registry/v1/register.proto".to_string(),
+                "pkg/httpapi/register.go".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn proto_messages_found_only_in_proto_hunks() {
+        let msgs = changed_proto_messages(FAKE_DIFF);
+        // Registration appears as context, NotRegistered as an addition; the
+        // go file's "// message handling" comment must NOT match.
+        assert_eq!(msgs, vec!["Registration".to_string(), "NotRegistered".to_string()]);
+    }
+
+    #[test]
+    fn no_proto_no_messages() {
+        let diff = "+++ b/main.go\n+message Fake {\n";
+        assert!(changed_proto_messages(diff).is_empty());
+    }
+}
