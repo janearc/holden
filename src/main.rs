@@ -6,6 +6,7 @@
 //   ruling/ratify commit status to the head sha.
 
 mod assemble;
+mod lane;
 mod publish;
 mod ruling;
 mod spawn;
@@ -43,6 +44,10 @@ struct Args {
     /// write the ledger but post no status (rehearsal / hostile-network mode)
     #[arg(long)]
     skip_status: bool,
+    /// skip the durability lane (no commit/push of the ruling); for a truly
+    /// local rehearsal — rehearsal mode otherwise keeps the lane on
+    #[arg(long)]
+    skip_lane: bool,
     /// judge executable (tests stub this; production default is claude)
     #[arg(long, default_value = "claude")]
     judge_cmd: String,
@@ -142,24 +147,56 @@ fn main() -> anyhow::Result<()> {
         spawn::rule(&cfg, &inputs)?
     };
 
-    // ledger first, status second: the status carries the ledger id, and a
-    // status without a ledger entry would be an untraceable claim.
+    // ledger first, lane second, status third (ratified ordering): the
+    // status carries the ledger id, and by the time it posts the entry is
+    // already durable off-laptop — or loudly known not to be. the lane
+    // never blocks the gate: degraded is loud + exit 3, not a bail.
     let path = publish::write_ledger(sprints_root, &inputs.repo_name, inputs.pr_number, &mut doc)?;
     println!("ledger: {}", path.display());
+
+    let mut lane_outcome = lane::LaneOutcome::Ok;
+    if !args.skip_lane {
+        let ledger_id = doc
+            .ruling
+            .ledger_entry_id
+            .as_deref()
+            .expect("write_ledger assigns the ledger id");
+        // the ledger id IS the sprint-relative path; its first component is
+        // the sprint dir the lane ref is named after
+        let sprint_dir = ledger_id
+            .split('/')
+            .next()
+            .expect("ledger id starts with the sprint dir");
+        lane_outcome = lane::lane_commit(sprints_root, sprint_dir, &path, ledger_id);
+        match &lane_outcome {
+            lane::LaneOutcome::Ok => println!("lane: {ledger_id} -> lane/{sprint_dir}"),
+            lane::LaneOutcome::Degraded { step, why } => {
+                eprintln!("lane: DEGRADED — {step}: {why}");
+            }
+        }
+    }
+
     if args.skip_status {
         println!(
             "status: SKIPPED (--skip-status); verdict was {:?}",
             doc.ruling.verdict
         );
-        return Ok(());
+    } else {
+        publish::post_status(repo, &inputs.head_sha, &doc)?;
+        println!(
+            "status: ruling/ratify -> {:?} on {} (pr {})",
+            doc.ruling.verdict,
+            &inputs.head_sha[..12.min(inputs.head_sha.len())],
+            inputs.pr_number
+        );
     }
-    publish::post_status(repo, &inputs.head_sha, &doc)?;
-    println!(
-        "status: ruling/ratify -> {:?} on {} (pr {})",
-        doc.ruling.verdict,
-        &inputs.head_sha[..12.min(inputs.head_sha.len())],
-        inputs.pr_number
-    );
+
+    // exit 3: ruling written (and status posted, unless skipped) but the
+    // lane is degraded — loud and machine-legible without stalling a merge
+    // the ruling already earned.
+    if !matches!(lane_outcome, lane::LaneOutcome::Ok) {
+        std::process::exit(3);
+    }
     Ok(())
 }
 

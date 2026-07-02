@@ -35,6 +35,7 @@ judge --validate-ruling <file>
 | `--include <path>` | Add a file's head content to the bundle. Repeatable. The supply side of a `needs-clarification` ruling: the judge names the evidence it needs, the re-fire provides it. |
 | `--overrule --reason <text>` | Operator overrule: write a ratify ruling that names itself an overrule, then post the status. An overrule is data, never a shrug. |
 | `--skip-status` | Write the ledger, post nothing. Rehearsal / hostile-network mode. |
+| `--skip-lane` | Skip the durability lane (no commit/push of the ruling). For a truly local rehearsal; rehearsal mode otherwise keeps the lane on. |
 | `--judge-cmd <bin>` | Judge executable. Default `claude`; tests stub it. |
 | `--model <name>` | Model override. Default: the CLI's configured model. |
 | `--work-root <dir>` | Fleet checkouts root for the consumer scan. Default `/Users/jane/work`. |
@@ -70,7 +71,8 @@ try and no partial credit.
 
 The accepted ruling is written to `sprints/<active-sprint>/rulings/` with the
 ledger id assigned by the harness (the sprint-relative path). Ledger entries
-are append-only; a filename collision is a refusal, not an overwrite.
+are append-only; a filename collision is a refusal, not an overwrite. The
+entry is then committed to the sprint's lane ref and pushed — see Durability.
 
 ## The status
 
@@ -86,6 +88,24 @@ untraceable claim. The status posts to the head sha, context `ruling/ratify`:
 Branch protection on the pilot repos lists `ruling/ratify` as required, so the
 ruling gates the merge without a model ever running in CI. The artifact stays
 home; the status is the trace.
+
+## Durability
+
+A ruling that exists only in the working tree dies with the laptop. After the
+ledger write and before the status post, the harness commits the entry onto a
+dedicated ref — `lane/<sprint-dir>` — and pushes it, so a ruling is durable
+off-laptop within seconds of existing. Review is not skipped, only deferred:
+the sprint's close PR opens from the lane branch, and the rulings enter
+`main` through that review.
+
+The mechanics (ratified in the sprint 8 pseudocode doc): git plumbing against
+a temporary index — the operator's checkout, index, and current branch are
+never touched. The lane NEVER blocks the gate. Any lane failure is a loud
+`lane: DEGRADED — <step>: <reason>` on stderr and exit code 3, never an
+abort: the ruling is on disk, the status still posts, and a failed push
+self-heals because the next push of the ref carries every commit under it.
+Unpushed lane commits are visible with
+`git log origin/lane/<sprint>..lane/<sprint>`.
 
 ## Security posture
 
@@ -120,6 +140,11 @@ failures and what they mean:
   half-ruling. Revisit when invocations stop being watched.
 - Network failures (`gh`, status posts) are loud errors. The environment is
   hostile; suspect it before the code.
+- Exit 3 with `lane: DEGRADED` on stderr — the ruling exists and the status
+  posted, but the durability lane failed (usually the push, on this network).
+  Nothing is lost: the entry is on disk and on the local lane ref; the next
+  push carries it. Loud so the operator knows, nonzero so a wrapper can tell,
+  non-blocking because the ruling already earned its merge.
 
 ## Maintenance path
 
