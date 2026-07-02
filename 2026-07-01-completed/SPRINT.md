@@ -641,3 +641,32 @@ Process verdict: this doc survived contact with real code five times and drifted
 (caught, not silent). The planning phase is over; next is running Phase 0 for real. Cut
 tomorrow's sprint from THIS file — the on-disk copy is canonical; there is no parallel
 version.
+
+---
+
+## 12. Sprint 0 outcome / retro (2026-07-02, on resolution)
+
+This was **Sprint 0**: the sprint-planning was, in fact, the entire sprint. That is not a
+failure — it is the honest record.
+
+**Scoped:** 0 -> 1 -> 2 (define the process, then Phase 0 inventory, Phase 1 instruction
+surface, Phase 2 gate ADR) in one ~half-day window.
+
+**Actually done:** defined the whole gate model + sprint process (§0-§4), ran Phase 0
+(inventory + the 7 findings filed + a 46-issue backlog burn-down that closed magpie#1 and
+paling#18). Net issue delta: +7 filed, -2 closed = **+5** (Section 10 discovery exemption).
+
+**Carried forward to Sprint 1 (2026-07-02):** Phase 1 (instruction surface) and Phase 2
+(gate ADR). Phase 3 remains backlog.
+
+**Calibration (the §4.2 lesson, live):** we planned 0->1->2 for a half-day and spent a
+FULL day on process-definition + Phase 0 alone. Massive over-scope — exactly the moving
+staleness wall §4.2 predicted. The sizing correction for Sprint 1: ONE phase, small,
+legible. The "define the process" work is one-time and does not recur; future sprints
+start from a settled process, so they should be far smaller.
+
+**Also surfaced:** the instruction-surface audit that §6 folded into Phase 0 was never run
+during Phase 0 (the Phase 0 agents chased CI/buf/coupling hypotheses instead). It is
+picked up as the opening task of Sprint 1, not retrofitted here — this sprint is closed.
+
+Resolved per §4.4: `git mv 2026-07-01 2026-07-01-completed`, SPRINT.md set read-only.
