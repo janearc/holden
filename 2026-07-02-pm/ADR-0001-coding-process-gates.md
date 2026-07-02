@@ -2,7 +2,8 @@
 
 - Status: DRAFT (pending markup) → Accepted on operator sign-off
 - Date: 2026-07-02
-- Deciders: Max (operator), Claude (agent)
+- Deciders: Max (operator), Claude (agent — drafted by Fable 5; Phase 0 evidence
+  gathered by Opus 4.8)
 - Evidence base: sprints `2026-07-01-completed/` (process definition + the Phase 0
   inventory, run against live repos and the GitHub API, not READMEs)
 
@@ -132,11 +133,15 @@ Per repo, as required checks:
   judge's (T3) and stays advisory until it has a track record.
 - **Coverage floor.** The existing 80% floor stays where wired — as a floor. Green
   coverage is not "tested" (see Decision 8).
-- **Ruling-present.** A deterministic check that a judge ruling file exists for the
-  head SHA with `verdict: ratify` (Decision 6). This is how a judgment gate becomes
-  mechanically enforceable without putting a model in CI: the model produces an
-  artifact; the machine verifies the artifact exists. During the pilot this check is
-  configured on the pilot repos only.
+- **Ruling-present.** A required commit STATUS, not a committed file: when the judge
+  writes a `verdict: ratify` ruling for the head SHA (into the sprint's rulings
+  directory — Decision 6), the local judge harness posts a `ruling/ratify` status on
+  that SHA via the GitHub API, and branch protection lists that status context as
+  required. This is how a judgment gate becomes mechanically enforceable without
+  putting a model in CI, and without committing process artifacts into the target
+  repo: the model produces an artifact locally; the machine-verifiable trace on GitHub
+  is the status. (Same pattern as any external CI system reporting into a PR.) During
+  the pilot this status is required on the pilot repos only.
 
 ## Decision 6 — The judge
 
@@ -170,15 +175,18 @@ ruling:
 Enum verdicts and file:line evidence are mandatory; a ruling without them is invalid
 and the ruling-present check treats it as absent.
 
-**The ledger.** The ruling IS the ledger entry — no separate write. Rulings are
-committed in the repo whose contract they judge, under `docs/rulings/`, named by date
-and diff ref. Rationale: the judge's only persistent memory is this ledger (fresh
-instances + durable artifacts is the whole design — a resident judge was considered
-and struck: long-lived sessions rot); keeping it in-repo makes it versioned, diffable,
-and adjacent to the contract it interprets. A central cross-repo ledger was rejected:
-it recreates the coordination-repo problem and detaches rulings from the code they
-bind. For a cross-repo seam, rulings live with the contract owner (see Decision 7's
-prerequisite).
+**The ledger.** The ruling IS the ledger entry — no separate write. Rulings live in
+the SPRINT directory (`sprints/<sprint>/rulings/`, named by date and diff ref), not in
+the target repo. Rationale: rulings are process records, not code — landing twenty
+commits on magpie in a day must not deposit twenty process files into magpie's public
+repo for readers who will never run this process; the volume alone would be cruft, and
+none of it needs to exist off this laptop. The sprints repo is private, local, and
+already the audit home for process artifacts: `rg` through `sprints/` answers any
+"what did we allow and why" question. The judge's only persistent memory is this
+ledger (fresh instances + durable artifacts is the whole design — a resident judge was
+considered and struck: long-lived sessions rot). The ruling's enforcement trace in the
+target repo is the commit status (Decision 5), which carries no content — the artifact
+stays home.
 
 **Authority during pilot.** The judge's ruling is required to land (via the
 ruling-present check) but the judge itself is new and unproven; the operator reviews
@@ -201,8 +209,9 @@ later pilot of the same pattern; nothing in this ADR narrows to "the bus" or wid
 both big-little-mesh and delightd, and `observability.v1` has the same floating-owner
 problem (big-little-mesh issue 77). Before the pilot's schema-breaking gate can bind,
 the pilot MUST pin single ownership of `registry.v1`/`frood.v1` and record it — the
-gate needs one source of truth to diff against. Owner: operator decision, recorded as
-a ledger-style note in the owning repo. This is a decision the pilot forces early, on
+gate needs one source of truth to diff against. Owner: operator decision, recorded in
+the owning repo's docs (a contract-ownership note — that one belongs with the
+contract; it is not a process ruling). This is a decision the pilot forces early, on
 purpose; it is exactly the class of ambiguity the gates exist to make impossible.
 
 **Success criteria — the pilot is done when all four have happened, not before:**
@@ -211,8 +220,8 @@ purpose; it is exactly the class of ambiguity the gates exist to make impossible
    magpie (Decision 4), `enforce_admins` on.
 2. A deliberately bad diff (a schema break, or hand-edited generated code) is BOUNCED
    by a required mechanical check — observed as a real failing, merge-blocking status.
-3. A real diff receives a real judge ruling, committed to the ledger, and the
-   ruling-present check gates on it.
+3. A real diff receives a real judge ruling, recorded in the sprint's rulings
+   directory, and the required `ruling/ratify` status gates the merge on it.
 4. An end-to-end proof exists and runs: magpie registers with delightd in a test
    harness and the registration is observable on the delightd side ("service A talks
    to service B and the product comes out") — the e2e bar from Decision 8 applied to
@@ -220,11 +229,20 @@ purpose; it is exactly the class of ambiguity the gates exist to make impossible
 
 ## Decision 8 — The test goalpost is the design doc
 
-Coverage percentage is a floor, not a goal, and it measures the wrong thing when used
-as one: a repo can be 80% covered and never once demonstrate the behavior its design
-doc promises. The standing question for every unit of work is: **with the software
-actually committed, can we test what the design doc says this thing does — and if not,
-why not, and why is anything else being worked on?**
+**Axiom (Goodhart's law, adopted as doctrine):** the moment a measure becomes a
+target, it stops measuring — optimization shifts to the metric and away from the
+outcome the metric was a proxy for, and the metric's usefulness ends. This has already
+been observed here: the coverage floor produced coverage-shaped tests and zero
+end-to-end proof, degrading test quality across the codebase while the number stayed
+green. Therefore: **quantified metrics are floors and tripwires, never goals.** The
+goalpost is always the qualitative artifact — the design doc — which cannot be gamed
+by optimizing a number.
+
+Coverage percentage measures the wrong thing when used as a goal: a repo can be 80%
+covered and never once demonstrate the behavior its design doc promises. The standing
+question for every unit of work is: **with the software actually committed, can we
+test what the design doc says this thing does — and if not, why not, and why is
+anything else being worked on?**
 
 Concretely:
 
@@ -256,7 +274,8 @@ starts as configuration (required checks) rather than new machinery; every landi
 leaves a durable, greppable record (rulings) of what was allowed and why.
 
 **Paid.** Friction on every land — by design, and it will be felt; a new artifact type
-(rulings) accumulates in repos; the judge costs one fresh model invocation per landing;
+(rulings) accumulates in the sprints repo; the judge costs one fresh model invocation
+per landing;
 admin bypass remains physically possible and is handled by making it loud rather than
 pretending it is impossible; the pilot forces an ownership decision (registry.v1) that
 was comfortable to leave ambiguous.
@@ -290,7 +309,11 @@ fresh-per-invocation + durable ledger is the design). Rewriting history anywhere
 - **One mandated gen-freshness posture.** Both observed postures are sound for their
   consumption patterns; mandating one would churn a working repo for symmetry's sake.
   The invariant is mandated instead (Decision 5).
-- **A central rulings store.** Detaches rulings from the contracts they bind;
-  recreates the monorepo-coordination problem the polyrepo design deliberately avoids.
+- **Rulings committed in the target repo** (`docs/rulings/` adjacent to the contract).
+  Rejected on volume and audience: a busy day deposits dozens of process files into a
+  public repo whose readers will never run this process, and none of it needs to exist
+  off-laptop. The sprint directory is the audit home; adjacency to the contract is not
+  worth the cruft, and the enforcement trace (the commit status) stays on the PR
+  regardless.
 - **Trusting hooks.** `--no-verify` exists. Hooks stay as the cheap fast layer; they
   are never the enforcement layer.
