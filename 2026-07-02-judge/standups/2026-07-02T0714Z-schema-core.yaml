@@ -1,0 +1,19 @@
+standup:
+  sprint: 2026-07-02-judge
+  fired_at: 2026-07-02T07:14:46Z
+  stage: draft-diff            # concept -> pseudocode passed at sprint cut; code exists now
+  elapsed_since_sprint_start: ~35m
+  elapsed_since_last_standup: n/a   # first standup record ever fired (4.3's first exercise)
+  plan_ref: sprints/2026-07-02-judge/SPRINT.md#t0-design--the-judge-harness
+  planned:
+    - "T0 design section written into the sprint doc (awaiting operator read; 3 calls flagged for veto: retry-once, status semantics, overrule flag)"
+    - "schema-first build: ruling schema as serde types + refusal tests, before any orchestration"
+  done:
+    - "sprint 4 cut and pushed (4b3f1f3); T0 design in-doc"
+    - "crate scaffolded at sprints/tools/judge (Rust, per in-sprint language decision)"
+    - "ruling.rs: full ADR D6 schema, deny_unknown_fields, enums, validate() invariants"
+    - "7/7 refusal tests green (unknown field, off-enum verdict, citation-less evidence, reasonless bounce, judge-assigned ledger id, empty justification)"
+  doc_content_agreement: agree   # code built matches the T0 design section as written
+  drift: []
+  halted: false
+  next_task: "await operator read of T0 design (3 flagged calls); then wire input assembly (gh pr diff, design docs, contracts, ledger, consumer list)"
