@@ -88,9 +88,18 @@ pub struct ConsumerImpact {
     pub evidence: String,
 }
 
+// where a ruling document sits in its lifecycle decides one invariant:
+// a judge's OUTPUT must not carry a ledger id (the harness assigns it);
+// a written LEDGER ENTRY must carry one (the harness assigned it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Context {
+    JudgeOutput,
+    LedgerEntry,
+}
+
 // invariants that shape alone cannot express. a ruling failing any of these
 // is treated exactly like one that failed to parse: absent.
-pub fn validate(doc: &RulingDoc) -> Result<(), Vec<String>> {
+pub fn validate(doc: &RulingDoc, ctx: Context) -> Result<(), Vec<String>> {
     let mut errs = Vec::new();
     let r = &doc.ruling;
 
@@ -103,9 +112,17 @@ pub fn validate(doc: &RulingDoc) -> Result<(), Vec<String>> {
     if r.shape_justification.trim().is_empty() {
         errs.push("shape_justification is empty".into());
     }
-    // the judge must not assign ledger ids; the harness does, on write.
-    if r.ledger_entry_id.is_some() {
-        errs.push("ledger_entry_id must not be set by the judge".into());
+    match ctx {
+        Context::JudgeOutput => {
+            if r.ledger_entry_id.is_some() {
+                errs.push("ledger_entry_id must not be set by the judge".into());
+            }
+        }
+        Context::LedgerEntry => {
+            if r.ledger_entry_id.is_none() {
+                errs.push("ledger entry missing its ledger_entry_id".into());
+            }
+        }
     }
     // a bounce must carry its reasons: at least one divergence, or wrong-shape.
     if r.verdict == Verdict::Bounce
@@ -150,13 +167,22 @@ fn is_file_line_citation(s: &str) -> bool {
     false
 }
 
-// parse-and-validate: the single entry point the harness uses. anything short
-// of Ok(..) is, by ADR rule, an ABSENT ruling.
-pub fn parse(yaml: &str) -> Result<RulingDoc, String> {
+// parse-and-validate. anything short of Ok(..) is, by ADR rule, ABSENT.
+fn parse_with(yaml: &str, ctx: Context) -> Result<RulingDoc, String> {
     let doc: RulingDoc =
         serde_yaml::from_str(yaml).map_err(|e| format!("ruling does not parse: {e}"))?;
-    validate(&doc).map_err(|errs| format!("ruling is invalid: {}", errs.join("; ")))?;
+    validate(&doc, ctx).map_err(|errs| format!("ruling is invalid: {}", errs.join("; ")))?;
     Ok(doc)
+}
+
+// what a freshly spawned judge hands back.
+pub fn parse(yaml: &str) -> Result<RulingDoc, String> {
+    parse_with(yaml, Context::JudgeOutput)
+}
+
+// what sits in the sprint ledger on disk.
+pub fn parse_ledger_entry(yaml: &str) -> Result<RulingDoc, String> {
+    parse_with(yaml, Context::LedgerEntry)
 }
 
 #[cfg(test)]
@@ -235,6 +261,16 @@ ruling:
             "doc_content_agreement: agree\n  ledger_entry_id: \"sneaky\"",
         );
         assert!(parse(&y).is_err(), "ledger ids are the harness's to assign");
+        // ...but the SAME document is a perfectly valid ledger entry.
+        assert!(parse_ledger_entry(&y).is_ok(), "written entries carry their id");
+    }
+
+    #[test]
+    fn ledger_entry_without_id_is_refused() {
+        assert!(
+            parse_ledger_entry(&valid_yaml()).is_err(),
+            "a ledger entry must carry the id the harness assigned"
+        );
     }
 
     #[test]
