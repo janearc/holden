@@ -1,0 +1,21 @@
+standup:
+  sprint: 2026-07-02-judge
+  fired_at: 2026-07-02T08:02:30Z
+  stage: landing-candidate
+  elapsed_since_sprint_start: ~3h
+  elapsed_since_last_standup: ~1h15m
+  plan_ref: sprints/2026-07-02-judge/SPRINT.md#t0-design--the-judge-harness
+  planned:
+    - "first real ruling on a real PR (magpie 22, fixes magpie issue 20)"
+  done:
+    - "FOUR rulings on magpie 22, every refusal correct, each hardening the harness:"
+    - "  r1 clarify (no existence evidence) -> head_tree added to bundle"
+    - "  r2 ratify w/ tree citations; left a forward tripwire re emit contracts"
+    - "  r3 clarify under the operator-expanded whole-document standard (paths cannot prove routing) -> --include added"
+    - "  r4 RATIFY: every doc clause cited to code lines; ruling 2's tripwire positively closed"
+    - "operator review caught the minimum-truth gaming vector; gate expanded to whole-post-image-document (ratified amendment in T0); the PR became a whole-README truth pass (new head 238e810)"
+    - "status on head: ruling/ratify=success + python check green"
+  doc_content_agreement: agree
+  drift: []   # the standard change was surfaced, operator-ratified, and recorded — amended plan, not drift
+  halted: false
+  next_task: "operator re-review + land of magpie 22; then flip ruling/ratify REQUIRED on the 3 pilot repos (the sprint's final act)"
