@@ -33,6 +33,10 @@ pub struct Inputs {
     // repo file paths at the PR head, so the judge can CITE the existence of
     // code that docs claim (added after the first real ruling asked for it).
     pub head_tree: Vec<String>,
+    // full head-content of operator-included files: the demand side of the
+    // needs-clarification dialogue (a judge names the evidence it needs; the
+    // re-fire supplies it via --include).
+    pub head_files: Vec<(String, String)>,
     // (path, contents) pairs; paths are repo-relative where possible.
     pub design_docs: Vec<(PathBuf, String)>,
     pub contracts_touched: Vec<(PathBuf, String)>,
@@ -67,6 +71,7 @@ pub fn assemble(
     pr_number: u64,
     work_root: &Path,
     sprints_root: &Path,
+    include: &[String],
 ) -> Result<Inputs> {
     let repo_name = repo_path
         .file_name()
@@ -123,6 +128,18 @@ pub fn assemble(
     };
     if head_tree.is_empty() {
         bail!("could not list the tree at head {head_sha}; the judge cannot verify existence claims");
+    }
+
+    // operator-included file contents at head: judge-requested evidence.
+    // a named file that does not exist at head is a loud error, not a skip —
+    // supplying wrong evidence silently would corrupt the ruling.
+    let mut head_files = Vec::new();
+    for path in include {
+        let content = run(Command::new("git")
+            .args(["show", &format!("{head_sha}:{path}")])
+            .current_dir(repo_path))
+        .with_context(|| format!("--include {path}: not readable at head {head_sha}"))?;
+        head_files.push((path.clone(), content));
     }
 
     // design docs: the repo's docs/ tree plus root-level DESIGN/VISION files,
@@ -227,6 +244,7 @@ pub fn assemble(
         head_sha,
         diff,
         head_tree,
+        head_files,
         design_docs,
         contracts_touched,
         ledger,

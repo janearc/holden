@@ -1,0 +1,22 @@
+ruling:
+  diff_ref: 238e810491c59375cdef0179b8742c535d7e6f20
+  judge_instance: judge-20260702T075355Z-p49116
+  fired_at: 2026-07-02T07:54:54Z
+  verdict: needs-clarification
+  divergences:
+  - claim: |
+      The cleanup step is reclassified from an interim direct-ollama path ("a local model (mistral, via ollama)... (Interim: this routes through the frood model abstraction once that lands.)", README.md:15-18, pre-image) to a landed frood integration ("The model is named logically (`mistral`) and resolved through the frood model client", README.md:15-18, post-image).
+    necessary: false
+    justification: |
+      The design doc's own pre-image states the frood model abstraction has NOT landed for this step (README.md:17-18, pre-image: "once that lands"). The post-image asserts it now has, but nothing in this bundle can evidence that: the diff is docs-only, CONTRACTS TOUCHED is none, no prior ruling ratified a PR landing frood-model-client routing in the pipeline, and — unlike the Status items ratified in rulings/2026-07-02T074856Z-magpie-pr22.yaml, each of which left a path-level trace (magpie/register.py, skill/SKILL.md, kube/service.yaml) — a routing change inside magpie/pipeline.py leaves no new path in the head tree. No tree path names frood, and a frood client dependency would live in pyproject.toml content, which a paths-only tree cannot show. Per the precedent set by rulings/2026-07-02T074505Z-magpie-pr22.yaml, when the bounce/ratify decision hinges on facts outside the bundle the correct verdict is needs-clarification, not bounce: provide the code diff or head content of magpie/pipeline.py and pyproject.toml (or the ratified ruling for the PR that landed the frood model client routing) and re-fire.
+  - claim: |
+      The Status section reclassifies delightd registration (register-on-start, health-gated, retry while unreachable), the agent skill + wrapper, and the kube manifests from "still to wire" (README.md:39-41, pre-image) to "Working today" (README.md:39-43, post-image).
+    necessary: true
+    justification: |
+      This hunk is byte-identical to the one ratified on the prior head sha in rulings/2026-07-02T074856Z-magpie-pr22.yaml, and the head tree for this sha carries the same evidence: delightd registration (magpie/register.py, tests/test_register.py), the agent skill + wrapper (skill/SKILL.md, skill/magpie, tests/test_wrapper_prompt_guard.py), and the kube manifests (kube/kustomization.yaml, kube/service.yaml). I stay consistent with that ruling: this portion is the doc tracking reality and is not in dispute; only the newly added cleanup hunk blocks ratification of the whole diff.
+  shape_verdict: on-mesh
+  shape_justification: |
+    Both prior rulings on this PR found the docs edit on-mesh and the new cleanup hunk does not change that: it keeps the plain stoic register and canonical vocabulary (frood, bento, bus — README.md:15-17 and README.md:42-43, post-image), replaces an implementation detail (ollama) with the named abstraction and a concrete resolution statement ("named logically (`mistral`) and resolved through the frood model client", README.md:15-17, post-image), retains the honest best-effort fallback ("if the model is down, the raw transcript is kept", README.md:17-18, post-image), and confines the blast radius to two hunks in one document. As before, shape is not the problem; verifiability of the content is.
+  consumer_impact: []
+  doc_content_agreement: unclear
+  ledger_entry_id: 2026-07-02-judge/rulings/2026-07-02T075514Z-magpie-pr22.yaml
