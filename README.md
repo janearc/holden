@@ -17,6 +17,24 @@ sprints/
   `-pm`, or a descriptive tag like `-pilot` when that reads better. The suffix is a
   label, not a schedule; resolution is always the explicit git mv, never the clock.
 
+## Sprint weight
+
+Some sprints are **heavy**: first-code work, many moving parts, or anything where
+drift is cheap to create and expensive to unwind. A sprint doc declares itself heavy
+at cut time, and a heavy sprint runs the full discipline, not the abbreviated one:
+
+- T0 design section written INTO the sprint doc and ratified before code;
+- real standup records (YAML, in `<sprint>/standups/`) at every phase boundary;
+- the stage enum tracked in the doc header; divergence = drift = hard stop.
+
+Light sprints (docs, config, single-decision work) may skip the standup ceremony but
+never the outcome record. When in doubt, call it heavy.
+
+## Durability
+
+This repo is private on GitHub — private, not laptop-only. Push after every landed
+commit; a laptop-in-canal or stolen-machine event must cost zero work.
+
 ## Lifecycle
 
 - While a sprint runs, `SPRINT.md` is the single source of truth. It is edited in place;

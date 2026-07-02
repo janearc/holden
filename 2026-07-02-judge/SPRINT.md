@@ -29,9 +29,12 @@ interpreter debugging); the harness fails CLOSED (merges stall — annoying, saf
 risk profile where compile-time pedantry costs nothing we care about. Operator
 concurred ("fast and pedantic").
 
-**Home: `sprints/tools/judge/`** (this repo, private, laptop-local — process tooling
-lives with the process records; a public repo would drag in tone/hygiene overhead
-with zero consumers).
+**Home: `sprints/tools/judge/`** (this repo — private on GitHub, not laptop-only:
+process tooling lives with the process records; a public repo would drag in
+tone/hygiene overhead with zero consumers). Durability rule, stated because it
+matters: this repo MUST be pushed to its private GitHub remote after every landed
+commit — a laptop-in-canal or stolen-machine event must cost zero work. Private ≠
+unpushed.
 
 **Flow (one invocation = one ruling):**
 
