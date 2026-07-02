@@ -58,3 +58,40 @@ check for each package.
 - Ownership notes committed to delightd and big-little-mesh docs after Max's call.
 - Outcome recorded; promoted via `git mv 2026-07-02-pilot 2026-07-02-pilot-completed`
   + chmod 400.
+
+## Outcome (2026-07-02, on resolution) — DONE, all three items
+
+1. **Protection live and verified.** Branch protection with required status checks on
+   big-little-mesh (gen-drift/go/python/rust), delightd (go/rust), magpie (python);
+   `enforce_admins: true` on all three; `strict: false` for now (green required,
+   up-to-date-branch not — avoids rebase churn on stacked diffs; tightenable). No
+   GitHub-review requirement: janearc-authored PRs cannot be janearc-approved, so
+   review stays in-conversation per the standing PR workflow. Verified by API
+   read-back.
+2. **Bounce proven.** blm PR 78: deliberate hand-edit to `gen/go/auth/v1/auth.pb.go`;
+   gen-drift FAILED (22s), go FAILED (11s), `mergeStateStatus: BLOCKED`; closed
+   unmerged, branch deleted. Yesterday's headline finding (404 on branch protection,
+   nothing unbypassable) is dead; blm issue 74 closed with both halves of evidence
+   (config read-back + observed bounce).
+3. **Ownership pinned** (operator decision): delightd owns `registry.v1` (+
+   `resolve.v1`); big-little-mesh owns `frood.v1` (+ substrate packages); each vendors
+   the other's. `observability.v1` deliberately left OPEN pending blm issue 77 — the
+   note declines to claim it so a docs PR cannot silently resolve a contested
+   ownership question (that decision is the operator's, via its own `Fixes #77` PR).
+   Landed as blm#79 (merge 7308102c) and delightd#64 (merge 67e3db81), through the new
+   required checks, on operator sign-off.
+
+Texture worth keeping:
+- delightd's own pre-push hook bounced the first push of PR 64 — legitimately (fresh
+  Posture-B checkout, no `gen/`); fixed by regenerating, NOT by `--no-verify`. The
+  gates creating friction that gets resolved correctly is the system working.
+- Environment: SSH :22 blocked at sprint start (VPN bounce healed it); the 1Password
+  signing agent locked twice (commits fell back to `--no-gpg-sign` per standing rule;
+  local main syncs done via one-off HTTPS fetch, remote config untouched throughout).
+- Net issues this sprint: -1 (closed blm 74; opened none).
+
+Pilot criteria scoreboard after this sprint: 1 DONE, 2 DONE, prerequisite DONE;
+remaining for the pilot: criterion 3 (judge ruling + required `ruling/ratify` status)
+and criterion 4 (magpie->delightd e2e registration proof) — the next sprint.
+
+Resolved per §4.4: `git mv 2026-07-02-pilot 2026-07-02-pilot-completed`, chmod 400.
