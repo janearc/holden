@@ -54,7 +54,9 @@ pub struct ConsumerHit {
 
 // run a subprocess and capture stdout; stderr becomes the error context.
 fn run(cmd: &mut Command) -> Result<String> {
-    let out = cmd.output().with_context(|| format!("spawning {:?}", cmd))?;
+    let out = cmd
+        .output()
+        .with_context(|| format!("spawning {:?}", cmd))?;
     if !out.status.success() {
         bail!(
             "{:?} failed ({}): {}",
@@ -82,8 +84,13 @@ pub fn assemble(
     // head sha + diff come from gh, scoped to the repo checkout.
     let head_sha = run(Command::new("gh")
         .args([
-            "pr", "view", &pr_number.to_string(),
-            "--json", "headRefOid", "-q", ".headRefOid",
+            "pr",
+            "view",
+            &pr_number.to_string(),
+            "--json",
+            "headRefOid",
+            "-q",
+            ".headRefOid",
         ])
         .current_dir(repo_path))?
     .trim()
@@ -110,7 +117,14 @@ pub fn assemble(
         Ok(s) => s.lines().map(str::to_string).collect(),
         Err(_) => {
             let nwo = run(Command::new("gh")
-                .args(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+                .args([
+                    "repo",
+                    "view",
+                    "--json",
+                    "nameWithOwner",
+                    "-q",
+                    ".nameWithOwner",
+                ])
                 .current_dir(repo_path))?
             .trim()
             .to_string();
@@ -118,7 +132,8 @@ pub fn assemble(
                 .args([
                     "api",
                     &format!("repos/{nwo}/git/trees/{head_sha}?recursive=1"),
-                    "-q", ".tree[] | select(.type==\"blob\") | .path",
+                    "-q",
+                    ".tree[] | select(.type==\"blob\") | .path",
                 ])
                 .current_dir(repo_path))?
             .lines()
@@ -127,7 +142,9 @@ pub fn assemble(
         }
     };
     if head_tree.is_empty() {
-        bail!("could not list the tree at head {head_sha}; the judge cannot verify existence claims");
+        bail!(
+            "could not list the tree at head {head_sha}; the judge cannot verify existence claims"
+        );
     }
 
     // operator-included file contents at head: judge-requested evidence.
@@ -164,8 +181,8 @@ pub fn assemble(
         entries.sort();
         for p in entries {
             let rel = PathBuf::from("docs").join(p.file_name().unwrap());
-            let s = std::fs::read_to_string(&p)
-                .with_context(|| format!("reading {}", p.display()))?;
+            let s =
+                std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
             design_docs.push((rel, s));
         }
     }
@@ -222,7 +239,18 @@ pub fn assemble(
             // rg exits 1 on no-matches; that is not an error here.
             let out = Command::new("rg")
                 .args(["-n", "--no-heading", "-w", &msg])
-                .args(["-g", "!*.pb.go", "-g", "!*_pb2.py*", "-g", "!gen/**", "-g", "!vendor/**", "-g", "!.venv/**"])
+                .args([
+                    "-g",
+                    "!*.pb.go",
+                    "-g",
+                    "!*_pb2.py*",
+                    "-g",
+                    "!gen/**",
+                    "-g",
+                    "!vendor/**",
+                    "-g",
+                    "!.venv/**",
+                ])
                 .arg(".")
                 .current_dir(&dir)
                 .output()
@@ -337,7 +365,10 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
         let msgs = changed_proto_messages(FAKE_DIFF);
         // Registration appears as context, NotRegistered as an addition; the
         // go file's "// message handling" comment must NOT match.
-        assert_eq!(msgs, vec!["Registration".to_string(), "NotRegistered".to_string()]);
+        assert_eq!(
+            msgs,
+            vec!["Registration".to_string(), "NotRegistered".to_string()]
+        );
     }
 
     #[test]

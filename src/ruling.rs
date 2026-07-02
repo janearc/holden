@@ -148,7 +148,11 @@ pub fn validate(doc: &RulingDoc, ctx: Context) -> Result<(), Vec<String>> {
         }
     }
 
-    if errs.is_empty() { Ok(()) } else { Err(errs) }
+    if errs.is_empty() {
+        Ok(())
+    } else {
+        Err(errs)
+    }
 }
 
 // evidence must contain at least one `path:NNN` citation somewhere in it.
@@ -157,7 +161,8 @@ fn is_file_line_citation(s: &str) -> bool {
     let b = s.as_bytes();
     for (i, &ch) in b.iter().enumerate() {
         if ch == b':' && i > 0 {
-            let prev_ok = b[i - 1].is_ascii_alphanumeric() || matches!(b[i - 1], b'.' | b'/' | b'_' | b'-');
+            let prev_ok =
+                b[i - 1].is_ascii_alphanumeric() || matches!(b[i - 1], b'.' | b'/' | b'_' | b'-');
             let next_digit = b.get(i + 1).is_some_and(|c| c.is_ascii_digit());
             if prev_ok && next_digit {
                 return true;
@@ -221,7 +226,10 @@ ruling:
     #[test]
     fn unknown_field_is_refused() {
         let y = valid_yaml().replace("verdict: ratify", "verdict: ratify\n  vibes: immaculate");
-        assert!(parse(&y).is_err(), "unknown field must refuse to deserialize");
+        assert!(
+            parse(&y).is_err(),
+            "unknown field must refuse to deserialize"
+        );
     }
 
     #[test]
@@ -262,7 +270,10 @@ ruling:
         );
         assert!(parse(&y).is_err(), "ledger ids are the harness's to assign");
         // ...but the SAME document is a perfectly valid ledger entry.
-        assert!(parse_ledger_entry(&y).is_ok(), "written entries carry their id");
+        assert!(
+            parse_ledger_entry(&y).is_ok(),
+            "written entries carry their id"
+        );
     }
 
     #[test]

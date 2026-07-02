@@ -19,7 +19,10 @@ pub fn active_sprint(sprints_root: &Path) -> Result<PathBuf> {
         .filter(|p| {
             p.is_dir()
                 && p.join("SPRINT.md").is_file()
-                && !p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with("-completed"))
+                && !p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.ends_with("-completed"))
         })
         .collect();
     candidates.sort();
@@ -64,7 +67,14 @@ pub fn write_ledger(
 pub fn post_status(repo_path: &Path, head_sha: &str, doc: &RulingDoc) -> Result<()> {
     let nwo = String::from_utf8(
         Command::new("gh")
-            .args(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+            .args([
+                "repo",
+                "view",
+                "--json",
+                "nameWithOwner",
+                "-q",
+                ".nameWithOwner",
+            ])
             .current_dir(repo_path)
             .output()
             .context("resolving nameWithOwner")?
@@ -92,9 +102,12 @@ pub fn post_status(repo_path: &Path, head_sha: &str, doc: &RulingDoc) -> Result<
         .args([
             "api",
             &format!("repos/{nwo}/statuses/{head_sha}"),
-            "-f", &format!("state={state}"),
-            "-f", "context=ruling/ratify",
-            "-f", &format!("description={description} [{ledger_ref}]"),
+            "-f",
+            &format!("state={state}"),
+            "-f",
+            "context=ruling/ratify",
+            "-f",
+            &format!("description={description} [{ledger_ref}]"),
         ])
         .current_dir(repo_path)
         .output()

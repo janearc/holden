@@ -67,7 +67,10 @@ fn main() -> anyhow::Result<()> {
         let yaml = std::fs::read_to_string(path)?;
         match ruling::parse_ledger_entry(&yaml) {
             Ok(doc) => {
-                println!("VALID: verdict={:?} shape={:?}", doc.ruling.verdict, doc.ruling.shape_verdict);
+                println!(
+                    "VALID: verdict={:?} shape={:?}",
+                    doc.ruling.verdict, doc.ruling.shape_verdict
+                );
                 return Ok(());
             }
             Err(e) => {
@@ -86,10 +89,34 @@ fn main() -> anyhow::Result<()> {
     if args.dry_run {
         // a human-readable audit of exactly what the judge would receive.
         println!("repo:          {}", inputs.repo_name);
-        println!("pr:            {} (head {})", inputs.pr_number, &inputs.head_sha[..12.min(inputs.head_sha.len())]);
+        println!(
+            "pr:            {} (head {})",
+            inputs.pr_number,
+            &inputs.head_sha[..12.min(inputs.head_sha.len())]
+        );
         println!("diff:          {} lines", inputs.diff.lines().count());
-        println!("design docs:   {}", inputs.design_docs.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>().join(", "));
-        println!("contracts:     {}", if inputs.contracts_touched.is_empty() { "(none touched)".into() } else { inputs.contracts_touched.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>().join(", ") });
+        println!(
+            "design docs:   {}",
+            inputs
+                .design_docs
+                .iter()
+                .map(|(p, _)| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        println!(
+            "contracts:     {}",
+            if inputs.contracts_touched.is_empty() {
+                "(none touched)".into()
+            } else {
+                inputs
+                    .contracts_touched
+                    .iter()
+                    .map(|(p, _)| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        );
         println!("ledger:        {} prior ruling(s)", inputs.ledger.len());
         println!("consumer hits: {}", inputs.consumers.len());
         for c in &inputs.consumers {
@@ -102,10 +129,16 @@ fn main() -> anyhow::Result<()> {
     // ADR D6); otherwise a fresh judge is spawned and its output must survive
     // the schema or the ruling is absent.
     let (mut doc, _raw) = if args.overrule {
-        let reason = args.reason.clone().expect("clap enforces --reason with --overrule");
+        let reason = args
+            .reason
+            .clone()
+            .expect("clap enforces --reason with --overrule");
         (overrule_ruling(&inputs, &reason), String::new())
     } else {
-        let cfg = spawn::SpawnCfg { judge_cmd: args.judge_cmd.clone(), model: args.model.clone() };
+        let cfg = spawn::SpawnCfg {
+            judge_cmd: args.judge_cmd.clone(),
+            model: args.model.clone(),
+        };
         spawn::rule(&cfg, &inputs)?
     };
 
@@ -114,13 +147,18 @@ fn main() -> anyhow::Result<()> {
     let path = publish::write_ledger(sprints_root, &inputs.repo_name, inputs.pr_number, &mut doc)?;
     println!("ledger: {}", path.display());
     if args.skip_status {
-        println!("status: SKIPPED (--skip-status); verdict was {:?}", doc.ruling.verdict);
+        println!(
+            "status: SKIPPED (--skip-status); verdict was {:?}",
+            doc.ruling.verdict
+        );
         return Ok(());
     }
     publish::post_status(repo, &inputs.head_sha, &doc)?;
     println!(
         "status: ruling/ratify -> {:?} on {} (pr {})",
-        doc.ruling.verdict, &inputs.head_sha[..12.min(inputs.head_sha.len())], inputs.pr_number
+        doc.ruling.verdict,
+        &inputs.head_sha[..12.min(inputs.head_sha.len())],
+        inputs.pr_number
     );
     Ok(())
 }
@@ -131,8 +169,14 @@ fn main() -> anyhow::Result<()> {
 fn overrule_ruling(inputs: &assemble::Inputs, reason: &str) -> ruling::RulingDoc {
     ruling::RulingDoc {
         ruling: ruling::Ruling {
-            diff_ref: format!("{} pr {} @ {}", inputs.repo_name, inputs.pr_number, inputs.head_sha),
-            judge_instance: format!("operator-overrule-{}", chrono::Utc::now().format("%Y%m%dT%H%M%SZ")),
+            diff_ref: format!(
+                "{} pr {} @ {}",
+                inputs.repo_name, inputs.pr_number, inputs.head_sha
+            ),
+            judge_instance: format!(
+                "operator-overrule-{}",
+                chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+            ),
             fired_at: chrono::Utc::now(),
             verdict: ruling::Verdict::Ratify,
             divergences: vec![ruling::Divergence {
