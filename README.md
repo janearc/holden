@@ -44,3 +44,12 @@ commit; a laptop-in-canal or stolen-machine event must cost zero work.
   Once it is the record, it is immutable.
 
 The process itself is defined in the first sprint here (`2026-07-01/SPRINT.md`).
+
+## Agent context and handoff
+
+The working agent names its context usage when asked and unprompted at thresholds.
+At **65% context**, handoff planning STARTS — not at 80%, where quality visibly
+degrades: discussing the handoff itself consumes handoff budget, so the buffer is
+part of the design. The inbrief for a successor is the standing machinery — the
+active SPRINT.md, its standup records, and the rulings — never a hand-written
+transcript summary.
