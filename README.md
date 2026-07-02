@@ -67,3 +67,8 @@ bearing for agent handoffs. Nothing lands on `main` unreviewed:
   harness at judgment time and the merge they gate cannot wait on a sprints PR
   — the automation seam (auto-branch? post-hoc batch PR? a bot lane?) is that
   sprint's to design, not an excuse to pre-weaken this rule.
+
+Everything in this repository is documentation. The documentation register
+applies in full: plain over compelling, the 03:20 reader, capitals reserved for
+RFC 2119 keywords, and the same tonal pass any public-facing document gets.
+Chat register does not survive the trip into an artifact.
