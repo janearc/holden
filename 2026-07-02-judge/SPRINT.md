@@ -67,6 +67,16 @@ deserialize); the e2e is the goalpost.
 required contexts on the pilot repos. Required-flip is the LAST act, after the loop
 is proven.
 
+**Ratified amendment (operator review on magpie PR 22, 2026-07-02):** doc-content
+agreement is judged on the WHOLE post-image document, never the delta alone. The
+delta-scoped question had a gaming vector: append two locally-true sentences and the
+rest of the document can be a squirrel — minimum-truth-to-pass, Goodhart at the gate.
+The judge's standard is now the most truthful and descriptive document; locally-true
+additions beside stale surroundings are `disagree` with the stale passages cited.
+Proven necessary on the very first judged PR: its diff fixed the Status section while
+the Pipeline section's "(Interim: ... once that lands)" claim sat stale one section up
+(pipeline.py:19 imports `from frood import model`; it landed).
+
 ## Process discipline for this sprint
 
 - Heavy sprint => standup records are REAL here, first exercise of §4.3: YAML records
