@@ -1,0 +1,20 @@
+standup:
+  sprint: 2026-07-02-judge
+  fired_at: 2026-07-02T07:34:39Z
+  stage: draft-diff
+  elapsed_since_sprint_start: ~1h45m
+  elapsed_since_last_standup: ~45m
+  plan_ref: sprints/2026-07-02-judge/SPRINT.md#t0-design--the-judge-harness
+  planned:
+    - "spawn module (fresh judge, stdin prompt, retry-once) + publish module (ledger write, status post) + full main wiring"
+  done:
+    - "spawn.rs: prompt carries all D6 sections (tested); fence-tolerant/payload-pedantic; retry-once then absent-and-loud; --judge-cmd stubbing seam"
+    - "publish.rs: active-sprint detection (tested); append-only ledger with harness-assigned id; status success/failure/pending per ratified semantics"
+    - "main: full flow wired; --overrule + --reason writes an operator-overrule ruling (an overrule is data); --skip-status for rehearsal/hostile-network"
+    - "FULL PIPE REHEARSED: real blm PR 79 -> stub judge -> ledger written -> status skipped; no fake artifacts touched the real ledger or GitHub"
+    - "design subtlety caught by own validator: judge-output vs ledger-entry are distinct validation contexts (id forbidden vs required); split + tested"
+    - "16/16 tests, 0 warnings"
+  doc_content_agreement: agree
+  drift: []
+  halted: false
+  next_task: "first REAL ruling on a real PR (propose: fix magpie#20 stale README as the target diff), then flip ruling/ratify required on pilot repos"
