@@ -116,12 +116,18 @@ pub fn build_prompt(inputs: &Inputs) -> String {
     p
 }
 
-// ephemeral, never reused: utc stamp + pid is unique enough for a laptop.
+// ephemeral, never reused. uniqueness is guaranteed, not hoped for:
+// same process -> the counter differs; two processes in the same instant
+// -> the pid differs; a recycled pid -> the timestamp differs.
+static INSTANCE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub fn instance_id() -> String {
+    let seq = INSTANCE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     format!(
-        "judge-{}-p{}",
+        "judge-{}-p{}-s{}",
         chrono::Utc::now().format("%Y%m%dT%H%M%SZ"),
-        std::process::id()
+        std::process::id(),
+        seq
     )
 }
 
@@ -138,13 +144,29 @@ pub fn strip_fences(s: &str) -> &str {
 
 fn spawn_once(cfg: &SpawnCfg, prompt: &str) -> Result<String> {
     let mut cmd = Command::new(&cfg.judge_cmd);
-    cmd.arg("-p"); // headless: read prompt, reply, exit
+    // headless: read prompt, reply, exit.
+    cmd.arg("-p");
+    // the judge is a pure prompt-to-text function and gets NO tools: every
+    // input it may consider is already in the prompt, and the bundle is
+    // untrusted text (design docs from public repos ride in it). without
+    // this, bundle text can steer a tool-bearing process into acting as the
+    // operator. verified empirically (2026-07-02): with --tools "" the judge
+    // cannot read a nonce file; note that it may still PLAY-ACT tool calls
+    // as inert text rather than refuse — one more reason output only counts
+    // if it survives the ruling schema. residual risk, documented: bundle
+    // text can still try to steer the VERDICT; the citation mandate and
+    // operator review of rulings are the mitigation.
+    cmd.args(["--tools", ""]);
     if let Some(m) = &cfg.model {
         cmd.args(["--model", m]);
     }
     // prompt via stdin: real diffs blow argv limits.
-    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = cmd.spawn().with_context(|| format!("spawning judge {:?}", cfg.judge_cmd))?;
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("spawning judge {:?}", cfg.judge_cmd))?;
     child
         .stdin
         .as_mut()
@@ -171,7 +193,7 @@ pub fn rule(cfg: &SpawnCfg, inputs: &Inputs) -> Result<(RulingDoc, String)> {
     let first = spawn_once(cfg, &prompt)?;
     let yaml = strip_fences(&first).to_string();
     match ruling::parse(&yaml) {
-        Ok(doc) => return Ok((doc, yaml)),
+        Ok(doc) => Ok((doc, yaml)),
         Err(first_err) => {
             let retry_prompt = format!(
                 "{prompt}\n\n== YOUR PREVIOUS REPLY WAS REFUSED ==\n{first_err}\n\
@@ -202,7 +224,10 @@ mod tests {
             head_sha: "abc123def456".into(),
             diff: "+++ b/magpie/register.py\n+x = 1\n".into(),
             head_tree: vec!["magpie/register.py".into(), "kube/service.yaml".into()],
-            head_files: vec![("magpie/pipeline.py".into(), "from frood import model".into())],
+            head_files: vec![(
+                "magpie/pipeline.py".into(),
+                "from frood import model".into(),
+            )],
             design_docs: vec![(PathBuf::from("docs/design.md"), "the design".into())],
             contracts_touched: vec![],
             ledger: vec![],
@@ -214,24 +239,49 @@ mod tests {
     }
 
     #[test]
-    fn prompt_carries_every_required_section() {
+    fn prompt_carries_every_section_header() {
         let p = build_prompt(&fake_inputs());
-        for needle in [
-            "UNDER JUDGMENT",
-            "REPO TREE AT HEAD",
-            "REQUESTED FILE CONTENTS AT HEAD",
-            "from frood import model",
-            "DESIGN DOCS",
-            "CONTRACTS TOUCHED",
-            "PRIOR RULINGS",
-            "CONSUMERS OF CHANGED MESSAGE TYPES",
-            "THE DIFF",
-            "repo: magpie",
-            "head sha: abc123def456",
-            "register.go:15",
-            "kube/service.yaml",
+        // the section headers build_prompt writes, in order of appearance;
+        // a judge whose bundle is missing a section rules on partial inputs.
+        for header in [
+            "== UNDER JUDGMENT ==",
+            "== REPO TREE AT HEAD",
+            "== REQUESTED FILE CONTENTS AT HEAD",
+            "== DESIGN DOCS",
+            "== CONTRACTS TOUCHED ==",
+            "== PRIOR RULINGS",
+            "== CONSUMERS OF CHANGED MESSAGE TYPES ==",
+            "== THE DIFF ==",
         ] {
-            assert!(p.contains(needle), "prompt missing: {needle}");
+            assert!(p.contains(header), "prompt missing section: {header}");
+        }
+    }
+
+    #[test]
+    fn prompt_threads_the_inputs_through() {
+        let p = build_prompt(&fake_inputs());
+        // each snippet is a VALUE from fake_inputs() that must survive into
+        // the prompt text, paired with what its survival proves.
+        for (proves, snippet) in [
+            ("repo name reaches the judgment block", "repo: magpie"),
+            (
+                "head sha reaches the judgment block",
+                "head sha: abc123def456",
+            ),
+            (
+                "tree paths listed for existence claims",
+                "kube/service.yaml",
+            ),
+            (
+                "--include file contents included",
+                "from frood import model",
+            ),
+            ("consumer hits arrive citation-shaped", "register.go:15"),
+        ] {
+            assert!(
+                p.contains(snippet),
+                "prompt lost an input ({proves}): {snippet}"
+            );
         }
     }
 
@@ -243,12 +293,11 @@ mod tests {
     }
 
     #[test]
-    fn instance_ids_are_unique_enough() {
-        // same process, same second is possible; the format at least pins
-        // process + time. two sequential calls must not be identical only if
-        // the clock ticks — so just assert the shape here.
-        let id = instance_id();
-        assert!(id.starts_with("judge-20"), "unexpected id shape: {id}");
-        assert!(id.contains("-p"), "missing pid segment: {id}");
+    fn instance_ids_are_unique() {
+        // the counter guarantees this even with a frozen clock and one pid.
+        let a = instance_id();
+        let b = instance_id();
+        assert_ne!(a, b, "consecutive instance ids must differ");
+        assert!(a.starts_with("judge-20"), "unexpected id shape: {a}");
     }
 }
