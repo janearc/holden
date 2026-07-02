@@ -92,3 +92,44 @@ the Pipeline section's "(Interim: ... once that lands)" claim sat stale one sect
 - `ruling/ratify` REQUIRED on big-little-mesh, delightd, magpie; read-back verified.
 - Standup records exist for the phase boundaries actually crossed.
 - Outcome recorded; promoted via `git mv` + chmod 400.
+
+## Outcome (2026-07-02, on resolution) — DONE, every line of the definition met
+
+The harness: Rust, 16/16 refusal tests, 0 warnings, at `tools/judge/`. Schema-first
+build order held (types -> assembly -> spawn -> publish), and the validator caught its
+own author once (judge-output vs ledger-entry are distinct validation contexts).
+
+The first ruling became FOUR rulings on one 20-line docs PR (magpie 22, closing magpie
+issue 20), and that sequence is the sprint's real product — the judge earning
+authority exactly as ADR-0001 prescribed:
+
+- r1 clarify: refused to certify existence claims it could not cite -> head tree
+  became a bundle input.
+- r2 ratify with tree citations; left a forward tripwire for the future sidecar PR.
+- r3 clarify under the operator-expanded standard (below): paths cannot evidence
+  routing behavior; named the exact files it needed -> --include became the demand
+  side of the clarification dialogue.
+- r4 RATIFY: every doc clause cited to code lines (pipeline.py:19/27-30/72/74-76,
+  pyproject.toml:13-18); closed r2's tripwire positively; consistent with all three
+  predecessors by ledger id.
+
+Operator review supplied the sprint's most important correction: the delta-scoped
+doc-agreement question had a minimum-truth gaming vector (locally-true sentences
+beside a stale document pass the gate — Goodhart at the gate). Ratified amendment:
+the judge rules on the WHOLE post-image document; the standard is the most truthful
+and descriptive document, not the minimum change that passes. Proven necessary on the
+first judged PR — its own diff had fixed Status while a stale "(Interim: ... once
+that lands)" claim sat one section up.
+
+Enforcement: `ruling/ratify` is now a REQUIRED status on big-little-mesh, delightd,
+and magpie (read-back verified; enforce_admins stays on). Every merge on the pilot
+repos now needs a judge ruling. magpie 22 landed through the full gate stack (python
++ ruling/ratify green, operator sign-off) as the proof.
+
+Issues: closed magpie 20 (via the landed PR); opened none. Net -1.
+
+Carried forward: ADR pilot criterion 4 (magpie -> delightd e2e registration proof) —
+the next sprint, as scoped from the start. Also carried: the sidecar-PR tripwire
+recorded in r2/r4, which a future ruling must check.
+
+Resolved per §4.4: `git mv 2026-07-02-judge 2026-07-02-judge-completed`, chmod 400.
