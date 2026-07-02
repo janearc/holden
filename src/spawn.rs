@@ -47,7 +47,13 @@ pub fn build_prompt(inputs: &Inputs) -> String {
                evidence: <file:line citation>\n\
            doc_content_agreement: agree | disagree | unclear\n\n\
          Rules: a bounce MUST carry divergences or wrong-shape. Do NOT set \
-         ledger_entry_id (the harness assigns it). Unknown fields are refused.\n\n",
+         ledger_entry_id (the harness assigns it). Unknown fields are refused.\n\n\
+         Doc-content agreement is judged on the WHOLE post-image document, never the \
+         delta alone: after this diff, every touched document must be a truthful, \
+         coherent description of the system at head, in its entirety. A diff that adds \
+         locally-true sentences while surrounding claims remain stale is NOT agreement \
+         — mark disagree and cite the stale passages. The standard is the most truthful \
+         and descriptive document, not the minimum change that passes the gate.\n\n",
     );
 
     p.push_str(&format!(
