@@ -58,3 +58,51 @@ pull_request; joins the required contexts after the bounce proof.
 - `docpairs` REQUIRED on delightd main; read-back verified.
 - Maturity observations (>= whatever honestly surfaced) in standup notes.
 - Outcome recorded; promoted; then the session handoff.
+
+## Outcome (2026-07-02, on resolution) — DONE, by falsification and reframe
+
+The sprint set out to build the mechanical doc-pairing gate. It built it as
+ratified — and operator review falsified the design: a touch check measures
+touch, not truth; it invites empty-touch gaming; it could not have caught either
+drift actually found this week; and it had to disclaim itself to stay honest.
+The gate was withdrawn from the PR before landing. That sequence is the process
+working: T0 ratified a wrong design, the operator gate caught it, and the
+correction is recorded as ADR-0002 (doc pairing binds through the judge; the
+map survives as judge input; wiring belongs to the judge-governance sprint).
+
+Landed (delightd PR 68, merge 75dec695, closing delightd issue 66): the
+`.docpairs` implication map, and docs/api.md made honestly complete — fifteen
+routes, full per-route sections, extended 404 semantics. The api.md work took
+three readers: the judge found the drift, the agent fixed it table-deep, the
+judge caught table-complete/section-incomplete, the operator confirmed the
+final form. The planned bounce proof and required-status flip died with the
+mechanical gate and are recorded here as cut-by-design-change, not omitted.
+
+Process corrections landed during this sprint, all operator-driven:
+- Sprints git hygiene: this repo is the offline state repository; everything
+  lands via PR (sprints PR 1). The 095156Z ruling file was swept into that PR
+  by a reflexive `git add -A` — present in the reviewed diff but unnamed in its
+  commit message; the reflex is retired, paths are staged explicitly.
+- Documentation register applies to everything in this repo (README rule);
+  chat register does not survive into artifacts.
+- The judge harness itself was built without operator review, pseudocode,
+  documentation, or a maintenance path — named plainly as a governance hole.
+- The wonderlib deflection pattern named and corrected (ADR-0002, at operator
+  direction).
+
+Maturity observations for the week's conversation (operator brief): docs
+asserting absolutes nothing enforces; tooling output speaking banned
+vocabulary; organization by accretion (Taskfile); features lingering
+half-adopted without an adoption plan; each item locally correct and globally
+unowned.
+
+Issues: closed delightd 66; opened none. Net -1.
+
+Carried to the successor (its opening sprint, scoped): **bring the judge under
+its own law** — operator line-review of the existing Rust; documentation and a
+maintenance path; the `.docpairs` -> implicated-documents wiring through the
+full discussion -> pseudocode -> rough -> better cadence; the rulings-automation
+lane for sprints hygiene; the wonderlib evaluation on merits.
+
+Resolved per the standard mechanic; SPRINT.md and ADR-0002 chmod 400 after this
+PR lands.
