@@ -30,6 +30,9 @@ pub struct Inputs {
     pub pr_number: u64,
     pub head_sha: String,
     pub diff: String,
+    // repo file paths at the PR head, so the judge can CITE the existence of
+    // code that docs claim (added after the first real ruling asked for it).
+    pub head_tree: Vec<String>,
     // (path, contents) pairs; paths are repo-relative where possible.
     pub design_docs: Vec<(PathBuf, String)>,
     pub contracts_touched: Vec<(PathBuf, String)>,
@@ -89,6 +92,37 @@ pub fn assemble(
         .current_dir(repo_path))?;
     if diff.trim().is_empty() {
         bail!("PR {pr_number} has an empty diff; nothing to rule on");
+    }
+
+    // the tree at the PR head, paths only: existence-evidence for doc claims
+    // ("register.py exists at head" is citable; "trust me" is not). the head
+    // commit is local — branches are pushed from this checkout — but fall
+    // back to the remote API if it is not.
+    let head_tree: Vec<String> = match run(Command::new("git")
+        .args(["ls-tree", "-r", "--name-only", &head_sha])
+        .current_dir(repo_path))
+    {
+        Ok(s) => s.lines().map(str::to_string).collect(),
+        Err(_) => {
+            let nwo = run(Command::new("gh")
+                .args(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+                .current_dir(repo_path))?
+            .trim()
+            .to_string();
+            run(Command::new("gh")
+                .args([
+                    "api",
+                    &format!("repos/{nwo}/git/trees/{head_sha}?recursive=1"),
+                    "-q", ".tree[] | select(.type==\"blob\") | .path",
+                ])
+                .current_dir(repo_path))?
+            .lines()
+            .map(str::to_string)
+            .collect()
+        }
+    };
+    if head_tree.is_empty() {
+        bail!("could not list the tree at head {head_sha}; the judge cannot verify existence claims");
     }
 
     // design docs: the repo's docs/ tree plus root-level DESIGN/VISION files,
@@ -192,6 +226,7 @@ pub fn assemble(
         pr_number,
         head_sha,
         diff,
+        head_tree,
         design_docs,
         contracts_touched,
         ledger,
