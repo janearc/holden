@@ -91,10 +91,12 @@ pub fn assemble(
         bail!("PR {pr_number} has an empty diff; nothing to rule on");
     }
 
-    // design docs: the repo's docs/ tree plus root-level DESIGN/VISION files.
-    // the judge rules against the design as committed, not as remembered.
+    // design docs: the repo's docs/ tree plus root-level DESIGN/VISION files,
+    // plus the README — for small repos the README IS the design doc by
+    // convention (magpie), and for the rest it is legitimate context. the
+    // judge rules against the design as committed, not as remembered.
     let mut design_docs = Vec::new();
-    for name in ["DESIGN.md", "VISION.md"] {
+    for name in ["DESIGN.md", "VISION.md", "README.md"] {
         let p = repo_path.join(name);
         if let Ok(s) = std::fs::read_to_string(&p) {
             design_docs.push((PathBuf::from(name), s));
