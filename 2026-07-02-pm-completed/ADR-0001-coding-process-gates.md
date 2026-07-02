@@ -1,6 +1,6 @@
 # ADR 0001: Enforcement gates for the coding process
 
-- Status: DRAFT (pending markup) → Accepted on operator sign-off
+- Status: ACCEPTED (Max, 2026-07-02; one markup round)
 - Date: 2026-07-02
 - Deciders: Max (operator), Claude (agent — drafted by Fable 5; Phase 0 evidence
   gathered by Opus 4.8)

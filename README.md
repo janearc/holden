@@ -13,7 +13,9 @@ sprints/
 ```
 
 - **One sprint per day** is the default; the directory is the ISO date (`2026-07-01`).
-- If a day ever needs two, suffix the second: `2026-07-01-pm` (morning is unsuffixed).
+- If a day needs more than one, suffix later sprints with a short discriminator —
+  `-pm`, or a descriptive tag like `-pilot` when that reads better. The suffix is a
+  label, not a schedule; resolution is always the explicit git mv, never the clock.
 
 ## Lifecycle
 
