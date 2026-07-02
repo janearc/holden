@@ -1,0 +1,20 @@
+standup:
+  sprint: 2026-07-02-judge
+  fired_at: 2026-07-02T07:27:09Z
+  stage: draft-diff
+  elapsed_since_sprint_start: ~1h
+  elapsed_since_last_standup: ~25m
+  plan_ref: sprints/2026-07-02-judge/SPRINT.md#t0-design--the-judge-harness
+  planned:
+    - "T0 design ratified by operator (2 nits: push-durability, heavy-sprint identifier)"
+    - "input assembly module (ADR D6): diff, design docs, contracts, ledger, consumer scan"
+  done:
+    - "design RATIFIED; nits applied to sprint doc + sprints README; pushed"
+    - "assemble.rs: gh-derived head sha + diff; docs/ + DESIGN/VISION collection; touched-proto contents; cross-sprint ledger collection; roster consumer scan (pilot-const, post-pilot reads WorkstationConfig)"
+    - "no-design-docs = loud failure (a repo without a design artifact cannot be T3-judged; finding, not default-pass)"
+    - "--dry-run (input audit) + --validate-ruling (local half of ruling-present) modes; both exercised live"
+    - "10/10 tests, 0 warnings; dry-run verified against real blm PR 79"
+  doc_content_agreement: agree
+  drift: []
+  halted: false
+  next_task: "spawn module: fresh judge via claude -p, prompt from Inputs, retry-once, then ledger write + status post"
