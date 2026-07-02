@@ -71,6 +71,14 @@ pub fn build_prompt(inputs: &Inputs) -> String {
     }
     p.push('\n');
 
+    if !inputs.head_files.is_empty() {
+        p.push_str("== REQUESTED FILE CONTENTS AT HEAD (evidence you asked for) ==\n");
+        for (path, body) in &inputs.head_files {
+            p.push_str(&format!("--- {path} ---\n{body}\n"));
+        }
+        p.push('\n');
+    }
+
     p.push_str("== DESIGN DOCS (the goalpost; rule against THESE) ==\n");
     for (path, body) in &inputs.design_docs {
         p.push_str(&format!("--- {} ---\n{}\n", path.display(), body));
@@ -194,6 +202,7 @@ mod tests {
             head_sha: "abc123def456".into(),
             diff: "+++ b/magpie/register.py\n+x = 1\n".into(),
             head_tree: vec!["magpie/register.py".into(), "kube/service.yaml".into()],
+            head_files: vec![("magpie/pipeline.py".into(), "from frood import model".into())],
             design_docs: vec![(PathBuf::from("docs/design.md"), "the design".into())],
             contracts_touched: vec![],
             ledger: vec![],
@@ -210,6 +219,8 @@ mod tests {
         for needle in [
             "UNDER JUDGMENT",
             "REPO TREE AT HEAD",
+            "REQUESTED FILE CONTENTS AT HEAD",
+            "from frood import model",
             "DESIGN DOCS",
             "CONTRACTS TOUCHED",
             "PRIOR RULINGS",

@@ -36,6 +36,10 @@ struct Args {
     /// assemble and summarize the judge's inputs without spawning a judge
     #[arg(long)]
     dry_run: bool,
+    /// include a file's head content in the bundle (repeatable); the supply
+    /// side of a judge's needs-clarification evidence request
+    #[arg(long = "include", value_name = "PATH")]
+    include: Vec<String>,
     /// write the ledger but post no status (rehearsal / hostile-network mode)
     #[arg(long)]
     skip_status: bool,
@@ -77,7 +81,7 @@ fn main() -> anyhow::Result<()> {
     let work_root = std::path::Path::new(&args.work_root);
     let sprints_root = std::path::Path::new(&args.sprints_root);
 
-    let inputs = assemble::assemble(repo, args.pr_number, work_root, sprints_root)?;
+    let inputs = assemble::assemble(repo, args.pr_number, work_root, sprints_root, &args.include)?;
 
     if args.dry_run {
         // a human-readable audit of exactly what the judge would receive.
