@@ -58,6 +58,13 @@ pub fn build_prompt(inputs: &Inputs) -> String {
         instance_id()
     ));
 
+    p.push_str("== REPO TREE AT HEAD (paths only; cite these for existence claims) ==\n");
+    for path in &inputs.head_tree {
+        p.push_str(path);
+        p.push('\n');
+    }
+    p.push('\n');
+
     p.push_str("== DESIGN DOCS (the goalpost; rule against THESE) ==\n");
     for (path, body) in &inputs.design_docs {
         p.push_str(&format!("--- {} ---\n{}\n", path.display(), body));
@@ -180,6 +187,7 @@ mod tests {
             pr_number: 42,
             head_sha: "abc123def456".into(),
             diff: "+++ b/magpie/register.py\n+x = 1\n".into(),
+            head_tree: vec!["magpie/register.py".into(), "kube/service.yaml".into()],
             design_docs: vec![(PathBuf::from("docs/design.md"), "the design".into())],
             contracts_touched: vec![],
             ledger: vec![],
@@ -195,6 +203,7 @@ mod tests {
         let p = build_prompt(&fake_inputs());
         for needle in [
             "UNDER JUDGMENT",
+            "REPO TREE AT HEAD",
             "DESIGN DOCS",
             "CONTRACTS TOUCHED",
             "PRIOR RULINGS",
@@ -203,6 +212,7 @@ mod tests {
             "repo: magpie",
             "head sha: abc123def456",
             "register.go:15",
+            "kube/service.yaml",
         ] {
             assert!(p.contains(needle), "prompt missing: {needle}");
         }
