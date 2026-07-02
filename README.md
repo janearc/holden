@@ -53,3 +53,17 @@ degrades: discussing the handoff itself consumes handoff budget, so the buffer i
 part of the design. The inbrief for a successor is the standing machinery — the
 active SPRINT.md, its standup records, and the rulings — never a hand-written
 transcript summary.
+
+## Git hygiene (this repo is the offline state repository)
+
+This repo is the process's durable memory — unsummarized, canonical, and load-
+bearing for agent handoffs. Nothing lands on `main` unreviewed:
+
+- ALL changes go branch -> PR -> operator review -> land. Sprint docs, ADRs,
+  standups, rulings, tooling — no exceptions by default.
+- ADRs are reviewed AS PULL REQUESTS (a real diff, not pasted markdown) and
+  become immutable (chmod 400) when their sprint promotes.
+- Open question for the judge-governance sprint: rulings are written by the
+  harness at judgment time and the merge they gate cannot wait on a sprints PR
+  — the automation seam (auto-branch? post-hoc batch PR? a bot lane?) is that
+  sprint's to design, not an excuse to pre-weaken this rule.
