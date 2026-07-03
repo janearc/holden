@@ -48,18 +48,59 @@ struct Args {
     /// local rehearsal — rehearsal mode otherwise keeps the lane on
     #[arg(long)]
     skip_lane: bool,
-    /// judge executable (tests stub this; production default is claude)
-    #[arg(long, default_value = "claude")]
-    judge_cmd: String,
-    /// model override passed to the judge; default = the CLI's configured model
+    /// judge executable (tests stub this); flag over env JUDGE_CMD over default claude
+    #[arg(long)]
+    judge_cmd: Option<String>,
+    /// model override passed to the judge; flag over env JUDGE_MODEL over the CLI's configured model
     #[arg(long)]
     model: Option<String>,
-    /// root containing the fleet checkouts (consumer scan)
-    #[arg(long, default_value = "/Users/jane/work")]
+    /// root containing the fleet checkouts (consumer scan); flag over env JUDGE_WORK_ROOT over default
+    #[arg(long)]
+    work_root: Option<String>,
+    /// root of the sprints repo (ledger + ruling output); flag over env JUDGE_SPRINTS_ROOT over default
+    #[arg(long)]
+    sprints_root: Option<String>,
+}
+
+// the single config boundary (ratified 2026-07-03): every environment-derived
+// fact the judge consumes resolves ONCE at startup, flag over env over default,
+// into this struct — the container-readiness posture, and nothing more built.
+// deliberately carries NO credential of any kind: the spawned `claude` CLI owns
+// auth, so a secret never enters the judge's config, env handling, or docs.
+struct Config {
     work_root: String,
-    /// root of the sprints repo (ledger + ruling output)
-    #[arg(long, default_value = "/Users/jane/work/sprints")]
     sprints_root: String,
+    judge_cmd: String,
+    model: Option<String>,
+}
+
+impl Config {
+    fn resolve(args: &Args) -> Config {
+        Config {
+            work_root: pick(
+                args.work_root.clone(),
+                "JUDGE_WORK_ROOT",
+                "/Users/jane/work",
+            ),
+            sprints_root: pick(
+                args.sprints_root.clone(),
+                "JUDGE_SPRINTS_ROOT",
+                "/Users/jane/work/sprints",
+            ),
+            judge_cmd: pick(args.judge_cmd.clone(), "JUDGE_CMD", "claude"),
+            // model has no default: absent means the CLI's own configured model.
+            model: args
+                .model
+                .clone()
+                .or_else(|| std::env::var("JUDGE_MODEL").ok()),
+        }
+    }
+}
+
+// one fact's resolution: the flag wins, else the env var, else the default.
+fn pick(flag: Option<String>, env: &str, default: &str) -> String {
+    flag.or_else(|| std::env::var(env).ok())
+        .unwrap_or_else(|| default.to_string())
 }
 
 fn main() -> anyhow::Result<()> {
@@ -85,11 +126,12 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    // resolve every environment-derived fact through the one config boundary.
+    let cfg = Config::resolve(&args);
     let repo = std::path::Path::new(&args.repo_path);
-    let work_root = std::path::Path::new(&args.work_root);
-    let sprints_root = std::path::Path::new(&args.sprints_root);
+    let sprints_root = std::path::Path::new(&cfg.sprints_root);
 
-    let inputs = assemble::assemble(repo, args.pr_number, work_root, sprints_root, &args.include)?;
+    let inputs = assemble::assemble(repo, args.pr_number, &cfg, &args.include)?;
 
     if args.dry_run {
         // a human-readable audit of exactly what the judge would receive.
@@ -153,11 +195,11 @@ fn main() -> anyhow::Result<()> {
             .expect("clap enforces --reason with --overrule");
         (overrule_ruling(&inputs, &reason), String::new())
     } else {
-        let cfg = spawn::SpawnCfg {
-            judge_cmd: args.judge_cmd.clone(),
-            model: args.model.clone(),
+        let spawn_cfg = spawn::SpawnCfg {
+            judge_cmd: cfg.judge_cmd.clone(),
+            model: cfg.model.clone(),
         };
-        spawn::rule(&cfg, &inputs)?
+        spawn::rule(&spawn_cfg, &inputs)?
     };
 
     // ledger first, lane second, status third (ratified ordering): the
@@ -240,5 +282,23 @@ fn overrule_ruling(inputs: &assemble::Inputs, reason: &str) -> ruling::RulingDoc
             doc_content_agreement: ruling::DocContentAgreement::Unclear,
             ledger_entry_id: None,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pick;
+
+    #[test]
+    fn pick_resolves_flag_over_env_over_default() {
+        // a var name nothing else touches; set and removed inside this one
+        // test, so parallel tests never race on it.
+        let var = "JUDGE_TEST_PICK_VAR";
+        std::env::remove_var(var);
+        assert_eq!(pick(None, var, "dflt"), "dflt");
+        std::env::set_var(var, "from-env");
+        assert_eq!(pick(None, var, "dflt"), "from-env");
+        assert_eq!(pick(Some("from-flag".into()), var, "dflt"), "from-flag");
+        std::env::remove_var(var);
     }
 }

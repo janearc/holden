@@ -6,6 +6,7 @@
 // pure and unit-tested. network/API failures are loud errors — the harness
 // fails closed, it never rules on partial inputs.
 
+use crate::Config;
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -89,10 +90,11 @@ fn run(cmd: &mut Command) -> Result<String> {
 pub fn assemble(
     repo_path: &Path,
     pr_number: u64,
-    work_root: &Path,
-    sprints_root: &Path,
+    cfg: &Config,
     include: &[String],
 ) -> Result<Inputs> {
+    let work_root = Path::new(&cfg.work_root);
+    let sprints_root = Path::new(&cfg.sprints_root);
     let repo_name = repo_path
         .file_name()
         .and_then(|n| n.to_str())

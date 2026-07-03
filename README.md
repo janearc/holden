@@ -28,6 +28,12 @@ judge <repo-path> <pr-number> [flags]
 judge --validate-ruling <file>
 ```
 
+Every environment-derived fact resolves once at startup through a single
+config boundary: flag over environment variable over default. The config
+carries no credential of any kind — the spawned `claude` CLI owns auth
+(subscription), so a secret never enters the judge's config, environment
+handling, or docs.
+
 | Flag | What it does |
 |------|--------------|
 | `--validate-ruling <file>` | Validate a LEDGER ENTRY and exit (0 valid, 1 refused). No PR needed. |
@@ -36,10 +42,10 @@ judge --validate-ruling <file>
 | `--overrule --reason <text>` | Operator overrule: write a ratify ruling that names itself an overrule, then post the status. An overrule is data, never a shrug. |
 | `--skip-status` | Write the ledger, post nothing. Rehearsal / hostile-network mode. |
 | `--skip-lane` | Skip the durability lane (no commit/push of the ruling). For a truly local rehearsal; rehearsal mode otherwise keeps the lane on. |
-| `--judge-cmd <bin>` | Judge executable. Default `claude`; tests stub it. |
-| `--model <name>` | Model override. Default: the CLI's configured model. |
-| `--work-root <dir>` | Fleet checkouts root for the consumer scan. Default `/Users/jane/work`. |
-| `--sprints-root <dir>` | Sprints repo root (ledger home). Default `/Users/jane/work/sprints`. |
+| `--judge-cmd <bin>` | Judge executable. Flag over `JUDGE_CMD` over default `claude`; tests stub it. |
+| `--model <name>` | Model override. Flag over `JUDGE_MODEL`; absent means the CLI's configured model. |
+| `--work-root <dir>` | Fleet checkouts root for the consumer scan. Flag over `JUDGE_WORK_ROOT` over default `/Users/jane/work`. |
+| `--sprints-root <dir>` | Sprints repo root (ledger home). Flag over `JUDGE_SPRINTS_ROOT` over default `/Users/jane/work/sprints`. |
 
 ## The bundle
 
