@@ -71,6 +71,17 @@ struct DocPair {
     doc: String,
 }
 
+// one roster entry from delightd's GET /projects: the fleet's own answer to
+// "who is a consumer, and where does its checkout live".
+// stack note: dead_code allow until the integration commit of this stack
+// wires the roster into assemble().
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct RosterEntry {
+    pub name: String,
+    pub path: String,
+}
+
 // run a subprocess and capture stdout; stderr becomes the error context.
 fn run(cmd: &mut Command) -> Result<String> {
     let out = cmd
@@ -85,6 +96,38 @@ fn run(cmd: &mut Command) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+// pure: parse delightd's GET /projects envelope into roster entries. the wire
+// (delightd pkg/httpapi/httpapi.go, rosterResponse) is {status, projects[]},
+// each entry a protojson registry.v1.Project with snake_case fields; only name
+// and path are consumed here. a body without the envelope, or an entry missing
+// name or path, is a loud error — a roster the judge cannot read is not a roster.
+// stack note: dead_code allow until the integration commit of this stack.
+#[allow(dead_code)]
+fn parse_roster(body: &str) -> Result<Vec<RosterEntry>> {
+    let v: serde_json::Value =
+        serde_json::from_str(body).context("GET /projects body is not JSON")?;
+    let projects = v
+        .get("projects")
+        .and_then(|p| p.as_array())
+        .context("GET /projects body has no `projects` array")?;
+    let mut out = Vec::with_capacity(projects.len());
+    for p in projects {
+        let name = p
+            .get("name")
+            .and_then(|n| n.as_str())
+            .context("roster entry has no `name`")?;
+        let path = p
+            .get("path")
+            .and_then(|n| n.as_str())
+            .context("roster entry has no `path`")?;
+        out.push(RosterEntry {
+            name: name.to_string(),
+            path: path.to_string(),
+        });
+    }
+    Ok(out)
 }
 
 pub fn assemble(
@@ -601,5 +644,24 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].path, PathBuf::from("docs/operations.md"));
         assert!(got[0].content.is_none());
+    }
+
+    // delightd's GET /projects wire: {status, projects[]}, each entry a
+    // protojson registry.v1.Project (snake_case, sparse). the fixture carries
+    // fields beyond name/path to prove the parser reads the real shape, not a
+    // trimmed one.
+    const ROSTER_BODY: &str = r#"{"status":"ok","projects":[
+        {"name":"delightd","path":"/w/delightd","essential":true,"deploy":{},"remote_url":"git@github.com:janearc/delightd"},
+        {"name":"magpie","path":"/w/magpie","essential":false,"deploy":{}}
+    ]}"#;
+
+    #[test]
+    fn roster_parses_the_projects_envelope() {
+        let roster = parse_roster(ROSTER_BODY).unwrap();
+        assert_eq!(roster.len(), 2);
+        assert_eq!(roster[0].name, "delightd");
+        assert_eq!(roster[0].path, "/w/delightd");
+        assert_eq!(roster[1].name, "magpie");
+        assert_eq!(roster[1].path, "/w/magpie");
     }
 }
