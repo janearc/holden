@@ -11,6 +11,7 @@ mod publish;
 mod ruling;
 mod spawn;
 
+use anyhow::Context;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -75,25 +76,21 @@ struct Config {
 }
 
 impl Config {
-    fn resolve(args: &Args) -> Config {
-        Config {
-            work_root: pick(
-                args.work_root.clone(),
-                "JUDGE_WORK_ROOT",
-                "/Users/jane/work",
-            ),
-            sprints_root: pick(
+    fn resolve(args: &Args) -> anyhow::Result<Config> {
+        Ok(Config {
+            work_root: pick_path(args.work_root.clone(), "JUDGE_WORK_ROOT", "work")?,
+            sprints_root: pick_path(
                 args.sprints_root.clone(),
                 "JUDGE_SPRINTS_ROOT",
-                "/Users/jane/work/sprints",
-            ),
+                "work/sprints",
+            )?,
             judge_cmd: pick(args.judge_cmd.clone(), "JUDGE_CMD", "claude"),
             // model has no default: absent means the CLI's own configured model.
             model: args
                 .model
                 .clone()
                 .or_else(|| std::env::var("JUDGE_MODEL").ok()),
-        }
+        })
     }
 }
 
@@ -101,6 +98,19 @@ impl Config {
 fn pick(flag: Option<String>, env: &str, default: &str) -> String {
     flag.or_else(|| std::env::var(env).ok())
         .unwrap_or_else(|| default.to_string())
+}
+
+// a path fact whose default lives under HOME — no operator's absolute path is
+// hard-coded ("work" is just the name this fleet uses for its checkout root).
+// needing the default while HOME is unset is a loud error, never a guessed path.
+fn pick_path(flag: Option<String>, env: &str, rel: &str) -> anyhow::Result<String> {
+    if let Some(v) = flag.or_else(|| std::env::var(env).ok()) {
+        return Ok(v);
+    }
+    let home = std::env::var("HOME").with_context(|| {
+        format!("resolving the {env} default: HOME is unset and no flag or env supplied")
+    })?;
+    Ok(format!("{home}/{rel}"))
 }
 
 fn main() -> anyhow::Result<()> {
@@ -127,7 +137,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     // resolve every environment-derived fact through the one config boundary.
-    let cfg = Config::resolve(&args);
+    let cfg = Config::resolve(&args)?;
     let repo = std::path::Path::new(&args.repo_path);
     let sprints_root = std::path::Path::new(&cfg.sprints_root);
 
@@ -287,7 +297,22 @@ fn overrule_ruling(inputs: &assemble::Inputs, reason: &str) -> ruling::RulingDoc
 
 #[cfg(test)]
 mod tests {
-    use super::pick;
+    use super::{pick, pick_path};
+
+    #[test]
+    fn pick_path_defaults_under_home() {
+        // a var name nothing else touches; set and removed inside this test.
+        let var = "JUDGE_TEST_PICK_PATH_VAR";
+        std::env::remove_var(var);
+        let home = std::env::var("HOME").expect("test env has HOME");
+        assert_eq!(
+            pick_path(None, var, "work").unwrap(),
+            format!("{home}/work")
+        );
+        std::env::set_var(var, "/elsewhere");
+        assert_eq!(pick_path(None, var, "work").unwrap(), "/elsewhere");
+        std::env::remove_var(var);
+    }
 
     #[test]
     fn pick_resolves_flag_over_env_over_default() {

@@ -44,8 +44,8 @@ handling, or docs.
 | `--skip-lane` | Skip the durability lane (no commit/push of the ruling). For a truly local rehearsal; rehearsal mode otherwise keeps the lane on. |
 | `--judge-cmd <bin>` | Judge executable. Flag over `JUDGE_CMD` over default `claude`; tests stub it. |
 | `--model <name>` | Model override. Flag over `JUDGE_MODEL`; absent means the CLI's configured model. |
-| `--work-root <dir>` | Fleet checkouts root for the consumer scan. Flag over `JUDGE_WORK_ROOT` over default `/Users/jane/work`. |
-| `--sprints-root <dir>` | Sprints repo root (ledger home). Flag over `JUDGE_SPRINTS_ROOT` over default `/Users/jane/work/sprints`. |
+| `--work-root <dir>` | Fleet checkouts root for the consumer scan. Flag over `JUDGE_WORK_ROOT` over default `$HOME/work`. |
+| `--sprints-root <dir>` | Sprints repo root (ledger home). Flag over `JUDGE_SPRINTS_ROOT` over default `$HOME/work/sprints`. |
 
 ## The bundle
 
