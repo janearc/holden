@@ -217,21 +217,34 @@ pub fn assemble(
     // design docs. an absent file is a valid "no pairings" declaration.
     let mut implicated = Vec::new();
     let docpairs_path = repo_path.join(".docpairs");
-    if let Ok(body) = std::fs::read_to_string(&docpairs_path) {
-        let pairs = parse_docpairs(&body)
-            .with_context(|| format!("parsing {}", docpairs_path.display()))?;
-        let changed = changed_paths(&diff);
-        let design_paths: Vec<PathBuf> = design_docs.iter().map(|(p, _)| p.clone()).collect();
-        implicated = resolve_implicated(
-            &pairs,
-            &changed,
-            |doc| repo_path.join(doc).is_file(),
-            |doc| {
-                let p = repo_path.join(doc);
-                std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))
-            },
-            &design_paths,
-        )?;
+    match std::fs::read_to_string(&docpairs_path) {
+        Ok(body) => {
+            let pairs = parse_docpairs(&body)
+                .with_context(|| format!("parsing {}", docpairs_path.display()))?;
+            let changed = changed_paths(&diff);
+            let design_paths: Vec<PathBuf> = design_docs.iter().map(|(p, _)| p.clone()).collect();
+            implicated = resolve_implicated(
+                &pairs,
+                &changed,
+                |doc| repo_path.join(doc).is_file(),
+                |doc| {
+                    let p = repo_path.join(doc);
+                    std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))
+                },
+                &design_paths,
+            )?;
+        }
+        // absent is the valid "no pairings" declaration; any OTHER read error
+        // (permissions, IO) must not silently disarm doc pairing — fail closed.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(e).with_context(|| {
+                format!(
+                    "reading {} (present but unreadable)",
+                    docpairs_path.display()
+                )
+            })
+        }
     }
 
     // contract files touched by this diff, with their full current contents.
