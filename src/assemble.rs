@@ -685,6 +685,11 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
         assert!(got[0].content.is_none());
     }
 
+    // TEST FIXTURE — this const lives inside #[cfg(test)] mod tests and is
+    // compiled out of the binary; it is fake wire data, not configuration.
+    // (said explicitly because GitHub's diff view collapses the module header
+    // and rust keeps tests in the same file — PR 25 review nit.)
+    //
     // delightd's GET /projects wire: {status, projects[]}, each entry a
     // protojson registry.v1.Project (snake_case, sparse). the fixture carries
     // fields beyond name/path to prove the parser reads the real shape, not a
