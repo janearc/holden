@@ -53,7 +53,12 @@ pub fn build_prompt(inputs: &Inputs) -> String {
          coherent description of the system at head, in its entirety. A diff that adds \
          locally-true sentences while surrounding claims remain stale is NOT agreement \
          — mark disagree and cite the stale passages. The standard is the most truthful \
-         and descriptive document, not the minimum change that passes the gate.\n\n",
+         and descriptive document, not the minimum change that passes the gate.\n\n\
+         Some documents are IMPLICATED by this diff's paths: the target repo's \
+         .docpairs map pairs a changed path-prefix with the document that describes \
+         it, and the matched documents appear below under IMPLICATED DOCUMENTS. A \
+         diff that falsifies an implicated document without updating it MUST be \
+         bounced.\n\n",
     );
 
     p.push_str(&format!(
@@ -82,6 +87,23 @@ pub fn build_prompt(inputs: &Inputs) -> String {
     p.push_str("== DESIGN DOCS (the goalpost; rule against THESE) ==\n");
     for (path, body) in &inputs.design_docs {
         p.push_str(&format!("--- {} ---\n{}\n", path.display(), body));
+    }
+
+    p.push_str(
+        "\n== IMPLICATED DOCUMENTS (paired to the diff's paths via .docpairs; falsifying one without updating it MUST be bounced) ==\n",
+    );
+    if inputs.implicated.is_empty() {
+        p.push_str("(none; no .docpairs pairing matched this diff)\n");
+    } else {
+        for doc in &inputs.implicated {
+            match &doc.content {
+                Some(body) => p.push_str(&format!("--- {} ---\n{}\n", doc.path.display(), body)),
+                None => p.push_str(&format!(
+                    "--- {} --- (already included above among the design docs)\n",
+                    doc.path.display()
+                )),
+            }
+        }
     }
 
     if inputs.contracts_touched.is_empty() {
@@ -214,7 +236,7 @@ pub fn rule(cfg: &SpawnCfg, inputs: &Inputs) -> Result<(RulingDoc, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assemble::{ConsumerHit, Inputs};
+    use crate::assemble::{ConsumerHit, ImplicatedDoc, Inputs};
     use std::path::PathBuf;
 
     fn fake_inputs() -> Inputs {
@@ -235,6 +257,10 @@ mod tests {
                 message: "Registration".into(),
                 citation: "delightd/pkg/httpapi/register.go:15: uses Registration".into(),
             }],
+            implicated: vec![ImplicatedDoc {
+                path: PathBuf::from("docs/api.md"),
+                content: Some("the api contract".into()),
+            }],
         }
     }
 
@@ -248,6 +274,7 @@ mod tests {
             "== REPO TREE AT HEAD",
             "== REQUESTED FILE CONTENTS AT HEAD",
             "== DESIGN DOCS",
+            "== IMPLICATED DOCUMENTS",
             "== CONTRACTS TOUCHED ==",
             "== PRIOR RULINGS",
             "== CONSUMERS OF CHANGED MESSAGE TYPES ==",
@@ -277,6 +304,7 @@ mod tests {
                 "from frood import model",
             ),
             ("consumer hits arrive citation-shaped", "register.go:15"),
+            ("implicated document content rides in", "the api contract"),
         ] {
             assert!(
                 p.contains(snippet),

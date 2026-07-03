@@ -51,6 +51,7 @@ assembled fresh per invocation, and is instructed to cite only from them:
 | The diff | `gh pr diff` | The thing under judgment. Empty diff = refuse to run. |
 | Head sha + tree | `gh` / `git ls-tree` | Existence evidence. A doc claim like "register.py exists" is citable against the tree; "trust me" is not. |
 | Design docs | repo `docs/*.md`, `DESIGN.md`, `VISION.md`, `README.md` | The goalpost (ADR-0001 D8). A repo with no design artifact CANNOT be judged — that is a loud error, not a default pass. |
+| Implicated docs | repo `.docpairs` (literal `<path-prefix> -> <doc>`) | ADR-0002: a doc paired to a changed path-prefix rides in, and a diff that falsifies it without updating it is a bounce. A fired pair naming a missing doc is a loud error; a glob metacharacter in a prefix is refused (the map must migrate to literal prefixes). Absent `.docpairs` = no pairings. |
 | Contracts touched | `.proto` files named in the diff | The wire is the boundary-enforcer; the judge reads what changed on it. |
 | The ruling ledger | every `rulings/*.yaml` across all sprint dirs | The judge's only persistent memory. Fresh instances + a durable ledger replace a resident judge (struck in Sprint 0: long-lived sessions rot). |
 | Consumer scan | `rg` for changed proto message names across the roster | Consumer impact must be cited, not asserted. |

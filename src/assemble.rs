@@ -43,6 +43,9 @@ pub struct Inputs {
     // prior rulings, oldest first: the judge's only persistent memory.
     pub ledger: Vec<(PathBuf, String)>,
     pub consumers: Vec<ConsumerHit>,
+    // documents implicated by the diff's paths via .docpairs (ADR-0002 as
+    // amended by the 2026-07-03 markup: literal path-prefix matching).
+    pub implicated: Vec<ImplicatedDoc>,
 }
 
 #[derive(Debug)]
@@ -50,6 +53,21 @@ pub struct ConsumerHit {
     pub message: String,
     // "<repo>/<path>:<line>: <text>" — already citation-shaped for the ruling.
     pub citation: String,
+}
+
+#[derive(Debug)]
+pub struct ImplicatedDoc {
+    pub path: PathBuf,
+    // None => the doc already rides above among the design docs; it is marked
+    // implicated, not carried twice. Some(_) => its full content, included here.
+    pub content: Option<String>,
+}
+
+// a .docpairs pairing: a literal path-prefix and the document it implicates.
+#[derive(Debug)]
+struct DocPair {
+    prefix: String,
+    doc: String,
 }
 
 // run a subprocess and capture stdout; stderr becomes the error context.
@@ -192,6 +210,30 @@ pub fn assemble(
         bail!("{repo_name} has no design docs (docs/*.md, DESIGN.md, VISION.md); T3 cannot run without a design artifact");
     }
 
+    // implicated documents (ADR-0002, amended at the 2026-07-03 markup to
+    // literal path-prefix matching): .docpairs pairs a path-prefix with a
+    // document; a changed path that string-prefix-matches implicates the
+    // document. read from the working copy on disk, the same ingestion as
+    // design docs. an absent file is a valid "no pairings" declaration.
+    let mut implicated = Vec::new();
+    let docpairs_path = repo_path.join(".docpairs");
+    if let Ok(body) = std::fs::read_to_string(&docpairs_path) {
+        let pairs = parse_docpairs(&body)
+            .with_context(|| format!("parsing {}", docpairs_path.display()))?;
+        let changed = changed_paths(&diff);
+        let design_paths: Vec<PathBuf> = design_docs.iter().map(|(p, _)| p.clone()).collect();
+        implicated = resolve_implicated(
+            &pairs,
+            &changed,
+            |doc| repo_path.join(doc).is_file(),
+            |doc| {
+                let p = repo_path.join(doc);
+                std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))
+            },
+            &design_paths,
+        )?;
+    }
+
     // contract files touched by this diff, with their full current contents.
     let mut contracts_touched = Vec::new();
     for rel in changed_paths(&diff) {
@@ -277,7 +319,85 @@ pub fn assemble(
         contracts_touched,
         ledger,
         consumers,
+        implicated,
     })
+}
+
+// pure: parse a .docpairs body into pairings. `#` comments and blank lines are
+// ignored. a prefix bearing a glob metacharacter is a loud error: the map must
+// migrate to literal path-prefixes (the 2026-07-03 markup ruling amending
+// ADR-0002). silently never-matching a `**` suffix would defeat the pairing —
+// the judge forces the migration instead.
+fn parse_docpairs(body: &str) -> Result<Vec<DocPair>> {
+    let mut pairs = Vec::new();
+    for line in body.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (prefix, doc) = line
+            .split_once("->")
+            .with_context(|| format!(".docpairs line is not '<prefix> -> <doc>': {line}"))?;
+        let prefix = prefix.trim();
+        let doc = doc.trim();
+        if prefix.is_empty() || doc.is_empty() {
+            bail!(".docpairs line is not '<prefix> -> <doc>': {line}");
+        }
+        if prefix.contains('*') || prefix.contains('?') {
+            bail!(
+                ".docpairs prefix '{prefix}' contains a glob metacharacter; the map must \
+                 migrate to literal path-prefixes (matching is literal string-prefix, \
+                 no glob semantics)"
+            );
+        }
+        pairs.push(DocPair {
+            prefix: prefix.to_string(),
+            doc: doc.to_string(),
+        });
+    }
+    Ok(pairs)
+}
+
+// pure: resolve which documents a diff implicates. matching is literal
+// string-prefix (an exact file path is its own prefix); map order is preserved
+// and a document implicated by two prefixes enters once. `doc_exists`/`read_doc`
+// are the filesystem seam — real reads in assemble, fixtures in tests. a fired
+// pair naming a missing document is a loud, fail-closed error. a document
+// already carried among the design docs is marked (content None), not duplicated.
+fn resolve_implicated(
+    pairs: &[DocPair],
+    changed: &[String],
+    doc_exists: impl Fn(&str) -> bool,
+    read_doc: impl Fn(&str) -> Result<String>,
+    design_doc_paths: &[PathBuf],
+) -> Result<Vec<ImplicatedDoc>> {
+    let mut out = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    for pair in pairs {
+        if !changed.iter().any(|c| c.starts_with(&pair.prefix)) {
+            continue;
+        }
+        if seen.contains(&pair.doc) {
+            continue;
+        }
+        if !doc_exists(&pair.doc) {
+            bail!("docpairs names missing doc: {}", pair.doc);
+        }
+        seen.push(pair.doc.clone());
+        let already = design_doc_paths
+            .iter()
+            .any(|p| p.as_path() == Path::new(&pair.doc));
+        let content = if already {
+            None
+        } else {
+            Some(read_doc(&pair.doc)?)
+        };
+        out.push(ImplicatedDoc {
+            path: PathBuf::from(&pair.doc),
+            content,
+        });
+    }
+    Ok(out)
 }
 
 // pure: repo-relative paths this unified diff touches ("+++ b/<path>").
@@ -375,5 +495,96 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
     fn no_proto_no_messages() {
         let diff = "+++ b/main.go\n+message Fake {\n";
         assert!(changed_proto_messages(diff).is_empty());
+    }
+
+    #[test]
+    fn docpairs_ignores_comments_and_blanks() {
+        let body = "# header\n\npkg/httpapi/ -> docs/api.md\n  # indented\nTaskfile.yml    -> docs/operations.md\n";
+        let pairs = parse_docpairs(body).unwrap();
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0].prefix, "pkg/httpapi/");
+        assert_eq!(pairs[0].doc, "docs/api.md");
+        assert_eq!(pairs[1].prefix, "Taskfile.yml");
+    }
+
+    #[test]
+    fn docpairs_wildcard_prefix_bails() {
+        // the delightd map still carries `**`; the judge must force migration.
+        let err = parse_docpairs("pkg/httpapi/** -> docs/api.md\n").unwrap_err();
+        assert!(
+            err.to_string().contains("migrate to literal"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn implicated_prefix_and_exact_match() {
+        // "pkg/httpapi/" fires by prefix; "Taskfile.yml" is its own prefix (an
+        // exact-file match). neither is a design doc, so content is carried.
+        let pairs =
+            parse_docpairs("pkg/httpapi/ -> docs/api.md\nTaskfile.yml -> docs/operations.md\n")
+                .unwrap();
+        let changed = vec![
+            "pkg/httpapi/register.go".to_string(),
+            "Taskfile.yml".to_string(),
+        ];
+        let got = resolve_implicated(
+            &pairs,
+            &changed,
+            |_| true,
+            |d| Ok(format!("body of {d}")),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].path, PathBuf::from("docs/api.md"));
+        assert_eq!(got[0].content.as_deref(), Some("body of docs/api.md"));
+        assert_eq!(got[1].path, PathBuf::from("docs/operations.md"));
+    }
+
+    #[test]
+    fn implicated_empty_when_nothing_matches() {
+        // an unmatched map (and, equivalently, an absent .docpairs) yields no
+        // implicated documents: a valid "no pairings" state, not an error.
+        let pairs = parse_docpairs("config/ -> docs/operations.md\n").unwrap();
+        let changed = vec!["pkg/httpapi/register.go".to_string()];
+        let got =
+            resolve_implicated(&pairs, &changed, |_| true, |_| Ok(String::new()), &[]).unwrap();
+        assert!(got.is_empty());
+        assert!(parse_docpairs("# only a comment\n").unwrap().is_empty());
+    }
+
+    #[test]
+    fn implicated_missing_doc_bails() {
+        let pairs = parse_docpairs("config/ -> docs/operations.md\n").unwrap();
+        let changed = vec!["config/broker.yml".to_string()];
+        let err = resolve_implicated(&pairs, &changed, |_| false, |_| Ok(String::new()), &[])
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "docpairs names missing doc: docs/operations.md"
+        );
+    }
+
+    #[test]
+    fn implicated_dedups_and_marks_existing_design_doc() {
+        // two prefixes implicate the SAME doc, which already rides as a design
+        // doc: one entry, marked (content None), read_doc never called.
+        let pairs =
+            parse_docpairs("config/ -> docs/operations.md\nTaskfile.yml -> docs/operations.md\n")
+                .unwrap();
+        let changed = vec!["config/broker.yml".to_string(), "Taskfile.yml".to_string()];
+        let design = vec![PathBuf::from("docs/operations.md")];
+        let got = resolve_implicated(
+            &pairs,
+            &changed,
+            |_| true,
+            |_| -> Result<String> { panic!("a marked design doc must not be re-read") },
+            &design,
+        )
+        .unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].path, PathBuf::from("docs/operations.md"));
+        assert!(got[0].content.is_none());
     }
 }

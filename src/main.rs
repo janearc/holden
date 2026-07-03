@@ -122,6 +122,19 @@ fn main() -> anyhow::Result<()> {
                     .join(", ")
             }
         );
+        println!(
+            "implicated:    {}",
+            if inputs.implicated.is_empty() {
+                "(none matched .docpairs)".into()
+            } else {
+                inputs
+                    .implicated
+                    .iter()
+                    .map(|d| d.path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        );
         println!("ledger:        {} prior ruling(s)", inputs.ledger.len());
         println!("consumer hits: {}", inputs.consumers.len());
         for c in &inputs.consumers {
