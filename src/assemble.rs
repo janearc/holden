@@ -11,20 +11,6 @@ use anyhow::{anyhow, bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// pilot-scope roster for the consumer scan: the registration-seam repos plus
-// the fleet repos that vendor generated contract types. post-pilot this reads
-// the fleet's WorkstationConfig instead of a constant — recorded as a pilot
-// boundary in the sprint doc, not a shortcut: the pilot binds one seam.
-const PILOT_ROSTER: &[&str] = &[
-    "big-little-mesh",
-    "delightd",
-    "magpie",
-    "kafka-logging",
-    "obs-svc",
-    "taco",
-    "paling",
-];
-
 #[derive(Debug)]
 pub struct Inputs {
     pub repo_name: String,
@@ -72,10 +58,9 @@ struct DocPair {
 }
 
 // one roster entry from delightd's GET /projects: the fleet's own answer to
-// "who is a consumer, and where does its checkout live".
-// stack note: dead_code allow (fields unread outside tests) until the
-// integration commit of this stack wires the roster into assemble().
-#[allow(dead_code)]
+// "who is a consumer, and where does its checkout live". path is authoritative
+// — the judge scans that directory, never work_root + name (delightd already
+// resolved where the checkout lives; the old known-debt carried that split).
 #[derive(Debug)]
 pub struct RosterEntry {
     pub name: String,
@@ -134,9 +119,6 @@ fn parse_roster(body: &str) -> Result<Vec<RosterEntry>> {
 // loud refusal carrying the ratified posture: delightd is the fleet's
 // orchestration, and a judge cannot rule while it is down. no retry loop; the
 // network is hostile and a wedged retry hides the finding.
-// stack note: dead_code allow until the integration commit of this stack
-// wires the roster into assemble().
-#[allow(dead_code)]
 fn fetch_roster(
     delightd_url: &str,
     fetch: impl Fn(&str) -> Result<String>,
@@ -152,13 +134,40 @@ fn fetch_roster(
     parse_roster(&body).map_err(refuse)
 }
 
+// resolve the roster to the consumer checkouts the scan will walk. the repo
+// under judgment is skipped by roster name (the residual — a checkout whose
+// dir name differs from its project name — is a named known-debt in the
+// README, per the ratified whiteboard, not silently defended here). a roster
+// path that is not a directory on disk is a loud finding, never a silent
+// skip: delightd is the source of truth, and a roster the workstation
+// contradicts is an inconsistency to fix, not to swallow (the fail-open debt
+// PILOT_ROSTER carried).
+fn consumer_dirs(roster: &[RosterEntry], judged_name: &str) -> Result<Vec<(String, PathBuf)>> {
+    let mut out = Vec::new();
+    for entry in roster {
+        if entry.name == judged_name {
+            continue;
+        }
+        let dir = PathBuf::from(&entry.path);
+        if !dir.is_dir() {
+            bail!(
+                "roster path for {} is not on disk: {} — delightd and the workstation \
+                 disagree; a roster inconsistency is a finding, not a skip",
+                entry.name,
+                entry.path
+            );
+        }
+        out.push((entry.name.clone(), dir));
+    }
+    Ok(out)
+}
+
 pub fn assemble(
     repo_path: &Path,
     pr_number: u64,
     cfg: &Config,
     include: &[String],
 ) -> Result<Inputs> {
-    let work_root = Path::new(&cfg.work_root);
     let sprints_root = Path::new(&cfg.sprints_root);
     let repo_name = repo_path
         .file_name()
@@ -348,16 +357,24 @@ pub fn assemble(
         }
     }
 
-    // consumer scan: for every message type named in touched proto hunks,
-    // rg the roster (excluding the repo under judgment) for uses. hits come
-    // back citation-shaped so the judge can cite rather than assert.
+    // the roster comes from delightd, the fleet's source of truth (GET
+    // /projects), not a hard-coded constant. delightd unreachable = the judge
+    // refuses to run: the fleet's orchestration is down, a production problem
+    // to fix before judging anything. fetched unconditionally — a judge must
+    // not silently rule while the fleet is degraded, even on a diff with no
+    // contract surface. the fetch is a curl subprocess through the same run()
+    // seam as gh/rg; no new HTTP client.
+    let roster = fetch_roster(&cfg.delightd_url, |url| {
+        run(Command::new("curl").args(["-fsS", url]))
+    })?;
+    let consumer_repos = consumer_dirs(&roster, &repo_name)?;
+
+    // consumer scan: for every message type named in touched proto hunks, rg
+    // each roster checkout for uses. hits come back citation-shaped so the
+    // judge can cite rather than assert.
     let mut consumers = Vec::new();
     for msg in changed_proto_messages(&diff) {
-        for other in PILOT_ROSTER.iter().filter(|r| **r != repo_name) {
-            let dir = work_root.join(other);
-            if !dir.is_dir() {
-                continue;
-            }
+        for (name, dir) in &consumer_repos {
             // rg exits 1 on no-matches; that is not an error here.
             let out = Command::new("rg")
                 .args(["-n", "--no-heading", "-w", &msg])
@@ -374,14 +391,14 @@ pub fn assemble(
                     "!.venv/**",
                 ])
                 .arg(".")
-                .current_dir(&dir)
+                .current_dir(dir)
                 .output()
                 .with_context(|| format!("rg in {}", dir.display()))?;
             if out.status.code() == Some(0) {
                 for line in String::from_utf8_lossy(&out.stdout).lines().take(20) {
                     consumers.push(ConsumerHit {
                         message: msg.clone(),
-                        citation: format!("{other}/{line}"),
+                        citation: format!("{name}/{line}"),
                     });
                 }
             }
@@ -702,5 +719,40 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
                 "refusal lost the posture: {err}"
             );
         }
+    }
+
+    #[test]
+    fn consumer_dirs_skips_the_judged_repo_by_name() {
+        // any directory that exists serves as a roster path fixture.
+        let real = std::env::temp_dir().display().to_string();
+        let roster = vec![
+            RosterEntry {
+                name: "delightd".into(),
+                path: real.clone(),
+            },
+            RosterEntry {
+                name: "magpie".into(),
+                path: real,
+            },
+        ];
+        let got = consumer_dirs(&roster, "delightd").unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].0, "magpie");
+    }
+
+    #[test]
+    fn consumer_dirs_missing_path_bails_loud() {
+        // the roster names a checkout that is not on disk: a loud finding,
+        // never the silent skip PILOT_ROSTER used to do.
+        let roster = vec![RosterEntry {
+            name: "ghost".into(),
+            path: "/nonexistent/judge-test-ghost".into(),
+        }];
+        let err = consumer_dirs(&roster, "delightd").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("delightd and the workstation disagree"),
+            "missing-path error lost its finding voice: {err}"
+        );
     }
 }

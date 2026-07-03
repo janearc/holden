@@ -55,9 +55,9 @@ struct Args {
     /// model override passed to the judge; flag over env JUDGE_MODEL over the CLI's configured model
     #[arg(long)]
     model: Option<String>,
-    /// root containing the fleet checkouts (consumer scan); flag over env JUDGE_WORK_ROOT over default
+    /// delightd control-port base URL for the roster; flag over env JUDGE_DELIGHTD_URL over default
     #[arg(long)]
-    work_root: Option<String>,
+    delightd_url: Option<String>,
     /// root of the sprints repo (ledger + ruling output); flag over env JUDGE_SPRINTS_ROOT over default
     #[arg(long)]
     sprints_root: Option<String>,
@@ -69,7 +69,7 @@ struct Args {
 // deliberately carries NO credential of any kind: the spawned `claude` CLI owns
 // auth, so a secret never enters the judge's config, env handling, or docs.
 struct Config {
-    work_root: String,
+    delightd_url: String,
     sprints_root: String,
     judge_cmd: String,
     model: Option<String>,
@@ -78,7 +78,13 @@ struct Config {
 impl Config {
     fn resolve(args: &Args) -> anyhow::Result<Config> {
         Ok(Config {
-            work_root: pick_path(args.work_root.clone(), "JUDGE_WORK_ROOT", "work")?,
+            // the default is delightd's DefaultControlPort — the documented
+            // single source of the default (pinned at the 2026-07-03 markup).
+            delightd_url: pick(
+                args.delightd_url.clone(),
+                "JUDGE_DELIGHTD_URL",
+                "http://127.0.0.1:8088",
+            ),
             sprints_root: pick_path(
                 args.sprints_root.clone(),
                 "JUDGE_SPRINTS_ROOT",

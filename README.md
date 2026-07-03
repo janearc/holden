@@ -44,7 +44,7 @@ handling, or docs.
 | `--skip-lane` | Skip the durability lane (no commit/push of the ruling). For a truly local rehearsal; rehearsal mode otherwise keeps the lane on. |
 | `--judge-cmd <bin>` | Judge executable. Flag over `JUDGE_CMD` over default `claude`; tests stub it. |
 | `--model <name>` | Model override. Flag over `JUDGE_MODEL`; absent means the CLI's configured model. |
-| `--work-root <dir>` | Fleet checkouts root for the consumer scan. Flag over `JUDGE_WORK_ROOT` over default `$HOME/work`. |
+| `--delightd-url <url>` | delightd control-port base URL for the roster. Flag over `JUDGE_DELIGHTD_URL` over default `http://127.0.0.1:8088` (delightd's DefaultControlPort). |
 | `--sprints-root <dir>` | Sprints repo root (ledger home). Flag over `JUDGE_SPRINTS_ROOT` over default `$HOME/work/sprints`. |
 
 ## The bundle
@@ -60,7 +60,7 @@ assembled fresh per invocation, and is instructed to cite only from them:
 | Implicated docs | repo `.docpairs` (literal `<path-prefix> -> <doc>`) | ADR-0002: a doc paired to a changed path-prefix rides in, and a diff that falsifies it without updating it is a bounce. A fired pair naming a missing doc is a loud error; a glob metacharacter in a prefix is refused (the map must migrate to literal prefixes). Absent `.docpairs` = no pairings. |
 | Contracts touched | `.proto` files named in the diff | The wire is the boundary-enforcer; the judge reads what changed on it. |
 | The ruling ledger | every `rulings/*.yaml` across all sprint dirs | The judge's only persistent memory. Fresh instances + a durable ledger replace a resident judge (struck in Sprint 0: long-lived sessions rot). |
-| Consumer scan | `rg` for changed proto message names across the roster | Consumer impact must be cited, not asserted. |
+| Consumer scan | `rg` for changed proto message names across delightd's live roster (`GET /projects`; each entry's `path` names the checkout) | Consumer impact must be cited, not asserted. delightd unreachable = the judge refuses to run: the fleet's orchestration is down, which is a production problem to fix before judging anything. A roster path missing on disk is equally loud — delightd and the workstation disagreeing is a finding, not a skip. |
 | `--include` files | `git show HEAD_SHA:path` | Judge-requested evidence. A named file missing at head is a loud error — wrong evidence supplied silently would corrupt the ruling. |
 
 ## The ruling
@@ -173,11 +173,12 @@ Named at the Sprint 7 line-review; each is carried deliberately, not forgotten:
 
 - Ledger growth: every prior ruling enters every bundle, unbounded. Needs a
   policy (wiring sprint), not a quiet truncation.
-- Roster: `PILOT_ROSTER` is a hard-coded constant scanning checkout DIRECTORY
-  names (`kafka-logging` is the checkout of janearc/kafka-svc — correct today,
-  fragile forever); a missing dir is skipped silently. The fix is roster from
-  delightd (`GET /projects`), fail-loud, kicked to the wiring sprint. The
-  repo-name vs dir-name split needs a mapping when that lands.
+- The repo under judgment is dropped from the consumer scan by roster NAME
+  matched against the checkout's directory basename. A checkout whose dir name
+  differs from its project name (`kafka-logging` for janearc/kafka-svc) would
+  scan itself — noise in the consumer hits, not a wrong ruling. The ratified
+  whiteboard accepted this residual; delightd's `path` field is the eventual
+  dissolver if it bites.
 - Deleted files are invisible to `changed_paths` (`+++ /dev/null`), so a
   deleted contract never enters the bundle.
 - The file:line citation mandate is schema-enforced only for consumer impact;
