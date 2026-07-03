@@ -7,7 +7,7 @@
 // fails closed, it never rules on partial inputs.
 
 use crate::Config;
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -73,8 +73,8 @@ struct DocPair {
 
 // one roster entry from delightd's GET /projects: the fleet's own answer to
 // "who is a consumer, and where does its checkout live".
-// stack note: dead_code allow until the integration commit of this stack
-// wires the roster into assemble().
+// stack note: dead_code allow (fields unread outside tests) until the
+// integration commit of this stack wires the roster into assemble().
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct RosterEntry {
@@ -103,8 +103,6 @@ fn run(cmd: &mut Command) -> Result<String> {
 // each entry a protojson registry.v1.Project with snake_case fields; only name
 // and path are consumed here. a body without the envelope, or an entry missing
 // name or path, is a loud error — a roster the judge cannot read is not a roster.
-// stack note: dead_code allow until the integration commit of this stack.
-#[allow(dead_code)]
 fn parse_roster(body: &str) -> Result<Vec<RosterEntry>> {
     let v: serde_json::Value =
         serde_json::from_str(body).context("GET /projects body is not JSON")?;
@@ -128,6 +126,30 @@ fn parse_roster(body: &str) -> Result<Vec<RosterEntry>> {
         });
     }
     Ok(out)
+}
+
+// acquire the roster from delightd. the fetch is injected so tests never touch
+// the network; production hands it a `curl -fsS` subprocess. ANY failure —
+// transport, non-200 (curl -f exits nonzero), or an unparseable body — is a
+// loud refusal carrying the ratified posture: delightd is the fleet's
+// orchestration, and a judge cannot rule while it is down. no retry loop; the
+// network is hostile and a wedged retry hides the finding.
+// stack note: dead_code allow until the integration commit of this stack
+// wires the roster into assemble().
+#[allow(dead_code)]
+fn fetch_roster(
+    delightd_url: &str,
+    fetch: impl Fn(&str) -> Result<String>,
+) -> Result<Vec<RosterEntry>> {
+    let url = format!("{}/projects", delightd_url.trim_end_matches('/'));
+    let refuse = |e: anyhow::Error| {
+        anyhow!(
+            "roster unavailable: delightd is down — the fleet is degraded; fix that \
+             before judging anything ({e})"
+        )
+    };
+    let body = fetch(&url).map_err(refuse)?;
+    parse_roster(&body).map_err(refuse)
 }
 
 pub fn assemble(
@@ -663,5 +685,22 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
         assert_eq!(roster[0].path, "/w/delightd");
         assert_eq!(roster[1].name, "magpie");
         assert_eq!(roster[1].path, "/w/magpie");
+    }
+
+    #[test]
+    fn roster_refusal_carries_the_posture() {
+        // a failing fetch (curl error / non-200) and an unparseable body both
+        // refuse with the same ratified message; the underlying error rides in.
+        for fetch in [
+            (|_: &str| bail!("curl: (7) Failed to connect")) as fn(&str) -> Result<String>,
+            (|_: &str| Ok("<html>502 Bad Gateway</html>".to_string()))
+                as fn(&str) -> Result<String>,
+        ] {
+            let err = fetch_roster("http://127.0.0.1:8088", fetch).unwrap_err();
+            assert!(
+                err.to_string().contains("the fleet is degraded"),
+                "refusal lost the posture: {err}"
+            );
+        }
     }
 }
