@@ -73,6 +73,12 @@ struct Config {
     sprints_root: String,
     judge_cmd: String,
     model: Option<String>,
+    // the workstation home, resolved once here per the boundary above: the
+    // roster's ~-prefixed paths are workstation-home-relative by contract
+    // (delightd serves delight.yaml's rows verbatim; judge and delightd share
+    // a workstation by construction), so expanding them is a config-derived
+    // fact, never an ad-hoc env read at the stat site.
+    home: String,
 }
 
 impl Config {
@@ -96,6 +102,11 @@ impl Config {
                 .model
                 .clone()
                 .or_else(|| std::env::var("JUDGE_MODEL").ok()),
+            // no flag: HOME is the workstation's fact, not an operator knob. It is
+            // already a hard requirement whenever sprints_root defaults; requiring it
+            // here keeps roster ~-expansion loud instead of guessed.
+            home: std::env::var("HOME")
+                .context("resolving the workstation home: HOME is unset")?,
         })
     }
 }

@@ -142,13 +142,26 @@ fn fetch_roster(
 // skip: delightd is the source of truth, and a roster the workstation
 // contradicts is an inconsistency to fix, not to swallow (the fail-open debt
 // PILOT_ROSTER carried).
-fn consumer_dirs(roster: &[RosterEntry], judged_name: &str) -> Result<Vec<(String, PathBuf)>> {
+fn consumer_dirs(
+    roster: &[RosterEntry],
+    judged_name: &str,
+    home: &str,
+) -> Result<Vec<(String, PathBuf)>> {
     let mut out = Vec::new();
     for entry in roster {
         if entry.name == judged_name {
             continue;
         }
-        let dir = PathBuf::from(&entry.path);
+        // the roster's path contract: a leading `~/` (or a bare `~`) is
+        // workstation-home-relative -- delightd serves delight.yaml's rows
+        // verbatim, and the rows use `~` on purpose so a layout relocation
+        // does not rot the roster. anything else is literal. expansion here
+        // uses the home the config boundary resolved, never a guess.
+        let dir = match entry.path.strip_prefix("~/") {
+            Some(rest) => PathBuf::from(home).join(rest),
+            None if entry.path == "~" => PathBuf::from(home),
+            None => PathBuf::from(&entry.path),
+        };
         if !dir.is_dir() {
             bail!(
                 "roster path for {} is not on disk: {} — delightd and the workstation \
@@ -367,7 +380,7 @@ pub fn assemble(
     let roster = fetch_roster(&cfg.delightd_url, |url| {
         run(Command::new("curl").args(["-fsS", url]))
     })?;
-    let consumer_repos = consumer_dirs(&roster, &repo_name)?;
+    let consumer_repos = consumer_dirs(&roster, &repo_name, &cfg.home)?;
 
     // consumer scan: for every message type named in touched proto hunks, rg
     // each roster checkout for uses. hits come back citation-shaped so the
@@ -740,9 +753,27 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
                 path: real,
             },
         ];
-        let got = consumer_dirs(&roster, "delightd").unwrap();
+        let got = consumer_dirs(&roster, "delightd", "/unused-home").unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].0, "magpie");
+    }
+
+    #[test]
+    fn consumer_dirs_expands_home_relative_paths() {
+        // the roster's `~/...` rows are workstation-home-relative by contract;
+        // the judge expands them against the config-resolved home. home is a
+        // parameter, so the fixture needs no env fiddling: point it at the
+        // temp dir's parent and name the temp dir's basename under `~/`.
+        let real = std::env::temp_dir();
+        let home = real.parent().expect("temp dir has a parent");
+        let base = real.file_name().expect("temp dir has a basename");
+        let roster = vec![RosterEntry {
+            name: "paling".into(),
+            path: format!("~/{}", base.to_string_lossy()),
+        }];
+        let got = consumer_dirs(&roster, "delightd", &home.to_string_lossy()).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].1, real, "~/ did not expand against the supplied home");
     }
 
     #[test]
@@ -753,7 +784,7 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
             name: "ghost".into(),
             path: "/nonexistent/judge-test-ghost".into(),
         }];
-        let err = consumer_dirs(&roster, "delightd").unwrap_err();
+        let err = consumer_dirs(&roster, "delightd", "/unused-home").unwrap_err();
         assert!(
             err.to_string()
                 .contains("delightd and the workstation disagree"),
