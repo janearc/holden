@@ -121,6 +121,18 @@ messages generated from haho's protos so the wire stays the enforcer:
   FAILED, loudly. holden owns timeout-and-kill for an instance that goes
   quiet.
 
+**Instances are plural.** One instance per workload, and arbitrarily many
+workloads in flight: nothing in the contract distinguishes the first instance
+from the tenth, because each is born with its own job, its own address, and
+its own landing. Isolation is per-container; the only state instances share is
+the externalized kind (the cache), which is exactly why the cache lives in
+surrealdb and not in the instance. What bounds fan-out is dispatch policy, not
+the contract: an API-backed model tolerates wide fan-out, a metal-bound model
+is a contended resource, so the spawner holds per-backend concurrency budgets
+in config and queues past them. Nor is the harness holden-exclusive — anything
+on the mesh with work to fan out (magpie is the obvious next customer) spawns
+instances under the same contract; holden assumes nothing about being alone.
+
 Which harness and which model answer — and what is inside the image — is
 haho's business and invisible to holden; haho defines itself in its own repo,
 not here. The current `spawn.rs` subprocess is the degenerate first
