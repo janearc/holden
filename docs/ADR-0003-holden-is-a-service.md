@@ -12,8 +12,9 @@
 ## Summary
 
 The judge grew up in the sprints repo as a hand-run CLI: an operator types a
-command, a `claude` subprocess renders a verdict, a YAML ruling lands in the
-sprint ledger, a commit status gates the merge. ADR-0001's design has held —
+command, a subprocess running a very powerful code-assessing model renders a
+verdict, a JSON ruling lands in the sprint ledger, a commit status gates the
+merge. ADR-0001's design has held —
 writer is never judge, done is external, rulings are schema'd artifacts — and
 that spine carries forward unchanged. What we outgrew is the mechanics around
 it: invocation only by a human at this keyboard, a model reached only as a
@@ -25,8 +26,8 @@ surface that the harness (haho) owns and holden merely consumes.
 ## What ADR-0001 got right, kept verbatim
 
 - **Fresh judgment per ruling.** Every ruling is a fresh model instance with no
-  memory of the diff's authoring. Unchanged, and load-bearing (see the
-  resident-judge reconciliation below).
+  memory of the diff's authoring. Unchanged (see the resident-judge
+  reconciliation below).
 - **Done is external** (ADR-0001 Decision 3). Mechanical gates green, a ratify
   ruling on the head SHA, operator sign-off. Nothing here relaxes that.
 - **Rulings are fixed-schema artifacts** in a durable ledger, enforced on GitHub
@@ -48,8 +49,7 @@ surface that the harness (haho) owns and holden merely consumes.
   evidence it ran is the artifact afterward. A service that gates every merge on
   three repos has health, and we cannot see it.
 - **Residual laptop assumptions.** Defaults like `~/work/sprints` survived one
-  filesystem relayout by luck. A service resolves its facts through config, once,
-  loudly.
+  filesystem relayout by luck. A service resolves its facts through config.
 
 ## Decision 1 — What "service" means here (the resident-judge reconciliation)
 
@@ -76,10 +76,11 @@ started this morning.
 - `WatchRulings(WatchRequest) returns (stream RulingEvent)` — holden emits;
   requestors and health-watchers observe instead of polling.
 
-`Ruling` is the protobuf twin of the ADR-0001 YAML schema — `diff_ref`,
+`Ruling` is the protobuf twin of the ADR-0001 ruling schema — `diff_ref`,
 `judge_instance`, `fired_at`, verdict enum, divergences, `shape_verdict`,
-consumer impact with file:line evidence, `doc_content_agreement` — one schema,
-two serializations, the proto authoritative once this lands. `RulingEvent`
+consumer impact with file:line evidence, `doc_content_agreement` — the proto
+authoritative once this lands, serialized as JSON at rest and on any
+human-facing surface. `RulingEvent`
 covers the lifecycle: RECEIVED, INPUTS_ASSEMBLED, JUDGE_SPAWNED, VERDICT,
 REFUSED_RETRY, PUBLISHED, FAILED. Consumers vendor-generate, per mesh practice.
 Bus emission (Kafka) is explicitly a later seam — kafka-svc owns bus contracts,
@@ -88,17 +89,19 @@ than smuggles.
 
 **Outbound — `haho.harness.v1.HarnessService`, owned by haho.** holden consumes
 a generated client of haho's existing contract (`Submit`, `StreamSubmit`,
-`GetHealth`). Which harness answers — the `claude` CLI, mistral, mapesis, a
-future haho with surrealdb caching and RAG — is haho's business and invisible
-to holden. The current `spawn.rs` subprocess becomes the first implementation
-*behind* that client interface, so nothing blocks on haho maturing.
+`GetHealth`). Which harness and which model answer is haho's business and
+invisible to holden; haho defines itself in its own repo, not here. The current
+`spawn.rs` subprocess becomes the first implementation *behind* that client
+interface, so nothing blocks on haho maturing.
 
-holden never defines a model contract, and haho never learns what a ruling is.
-That is the whole division of labor, and it is enforced by the wire.
+holden assesses; haho furnishes. holden never defines a model contract, and
+haho never learns what a ruling is. That is the whole division of labor, and it
+is enforced by the wire.
 
 ## Decision 3 — Resources and health
 
 Per fleet rules, holden gets `/health` and `/metrics`, structured JSON logging,
+heartbeats emitted on the event stream (so a watcher can tell idle from dead),
 and a readiness check that means something:
 
 | Check | Green means |
@@ -109,8 +112,8 @@ and a readiness check that means something:
 | `publisher_ready` | GitHub API reachable for status posting; if not, holden serves but reports DEGRADED, loudly — rulings queue rather than vanish |
 
 Config resolves once at startup, flag over env over default (the existing
-`Config` boundary), with the stale `~/work/sprints` default corrected as part
-of this work. holden carries no credentials; the harness owns model auth, the
+`Config` boundary). The stale `~/work/sprints` default WILL be fixed before
+holden is considered stable and in prod. holden carries no credentials; the harness owns model auth, the
 `gh` layer owns GitHub auth, exactly as today.
 
 ## Decision 4 — Migration, ordered
@@ -122,9 +125,11 @@ of this work. holden carries no credentials; the harness owns model auth, the
    and hostile-network modes keep working).
 3. `spawn.rs` moves behind a `HarnessService` client trait; subprocess shim is
    implementation one.
-4. haho graduates dev to prod. This is a **precondition for holden serving in
-   production** — a prod service does not take a hard dependency on a dev
-   repo's contract. Until then, holden-as-a-service runs against the shim.
+4. haho graduates dev to prod. holden and haho are separate services and
+   separate projects — but they share a fate in this effort to bring holden to
+   production: a prod service does not take a hard dependency on a dev repo's
+   contract, so the graduation is a **precondition for holden serving in
+   production**. Until then, holden-as-a-service runs against the shim.
 
 ## The e2e proof (Decision 8 compliance)
 
@@ -141,17 +146,19 @@ this design is not done, whatever the coverage number says.
   validation observable, which should make this bug diagnosable; it does not
   fix it by itself.
 - Bus emission of ruling events (kafka-svc seam, later pilot).
-- Where the ledger lives long-term. Today it stays in the sprints repo; a
-  surrealdb-backed ledger is plausible once the RAG layer exists, and is a
-  separate ADR.
+- Where the ledger lives long-term. Today it stays in the sprints repo; the
+  destination is decided — it must be surrealdb — and the move gets its own
+  ADR once the RAG layer exists.
 
 ## Consequences
 
 **Gained.** Anything on the mesh can request and observe a ruling; the harness
-is swappable without touching holden; the gate that guards three repos finally
-has a health surface of its own; the laptop-path era ends.
+is swappable without touching holden; the judge — which currently guards all
+the production repos — finally has a health surface of its own; the laptop-path
+era ends.
 
 **Paid.** Two contract surfaces to keep gen-fresh; a daemon to run and watch
 where a CLI used to suffice; a dev-to-prod graduation (haho) now sits on
 holden's critical path; the CLI-only escape hatch must keep working through the
-transition, which is a real maintenance tax.
+transition, which is a real maintenance tax. The price of growth is sprawl and
+overhead. But without growth there is no glory.
