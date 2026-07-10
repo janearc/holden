@@ -61,12 +61,12 @@ pub fn build_prompt(inputs: &Inputs) -> String {
          bounced.\n\n",
     );
 
+    // Captured once: the id also anchors the tail reminder below, and a second
+    // instance_id() call would mint a different id than the header promised.
+    let iid = instance_id();
     p.push_str(&format!(
         "== UNDER JUDGMENT ==\nrepo: {}\npr: {}\nhead sha: {}\njudge instance id: {}\n\n",
-        inputs.repo_name,
-        inputs.pr_number,
-        inputs.head_sha,
-        instance_id()
+        inputs.repo_name, inputs.pr_number, inputs.head_sha, iid
     ));
 
     p.push_str("== REPO TREE AT HEAD (paths only; cite these for existence claims) ==\n");
@@ -135,6 +135,25 @@ pub fn build_prompt(inputs: &Inputs) -> String {
 
     p.push_str("\n== THE DIFF ==\n");
     p.push_str(&inputs.diff);
+
+    // The schema instruction opens the prompt, and a doc-heavy bundle buries it:
+    // on large inputs the model reliably dropped diff_ref (the sprints#52 class;
+    // observed six consecutive times across two models on delightd pr121). The
+    // bookkeeping keys are restated here, adjacent to where the reply begins,
+    // with the literal values to copy. Scaffolding, not design: the service
+    // (ADR-0003) stamps these fields harness-side and this block dies then.
+    p.push_str(&format!(
+        "\n== REPLY FORMAT (restated; the schema at the top of this prompt is \
+         unchanged) ==\n\
+         Begin your reply now. Its opening lines MUST be exactly:\n\
+         ruling:\n\
+           diff_ref: \"{}\"\n\
+           judge_instance: \"{}\"\n\
+           fired_at: <UTC now, RFC3339>\n\
+         then verdict and the rest of the schema. A reply missing any of these \
+         fields is refused unread.\n",
+        inputs.head_sha, iid
+    ));
     p
 }
 
