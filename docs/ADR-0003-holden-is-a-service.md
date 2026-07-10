@@ -75,7 +75,11 @@ holden runs as a host-level operator container, on the delightd precedent and
 for a parallel reason: delightd lives host-side because it drives the cluster;
 holden lives host-side because the harness's work happens where the models
 live, and some of those models run on the workstation's metal, out of any
-fleet pod's reach. Host-level container, defined spawn seam.
+fleet pod's reach. The spawn seam is expected to be container-per-job: the
+harness ships as a baked image, so every spawn starts from the same known
+root — the job's materials are simply *there* — and killing a job is killing
+a container, not chasing a pid. A dirty harness is impossible because there is
+no harness left to be dirty.
 
 ## Decision 2 — Two contract surfaces, two owners
 
@@ -99,21 +103,29 @@ Bus emission (Kafka) is explicitly a later seam — kafka-svc owns bus contracts
 and wiring holden into the bus is a separate decision this ADR names rather
 than smuggles.
 
-**Outbound — the haho invocation contract, owned by haho.** Not a service
-endpoint: haho is ephemeral, and sockets are for residents. The contract is an
-invocation — a proto-defined job spec in on stdin, proto-defined JSON lines out
-on stdout, an exit code — with the messages generated from haho's protos so
-the wire stays the enforcer even when the wire is a pipe. The outbound stream
-carries three kinds of line: progress/heartbeat events while the job runs, and
-one terminal **completion record** — job id, outcome, the result payload,
-model used, token spend, cache statistics — the harness's sign-off to holden
-that the work was done, just before it exits. The exit code is the coarse
-cross-check: if it and the completion record disagree, the job is FAILED,
-loudly. holden owns timeout-and-kill for a haho that goes quiet. Which harness
-and which model answer is haho's business and invisible to holden; haho
-defines itself in its own repo, not here. The current `spawn.rs` subprocess is
-the degenerate first implementation of exactly this shape, so nothing blocks
-on haho maturing.
+**Outbound — the haho invocation contract, owned by haho.** An instance of the
+harness lives exactly one job, and the contract covers its three moments, all
+messages generated from haho's protos so the wire stays the enforcer:
+
+- **Birth.** holden spawns the instance with a proto-defined job spec on
+  stdin: everything this one assessment needs, and nothing else.
+- **Descent.** The work can take a long time, so a living instance is
+  queryable: it exposes a status endpoint for its lifetime — "still here,
+  still working," with progress — and holden records the instance's address at
+  spawn and relays what it learns onto `WatchRulings`. The endpoint's identity
+  dies with the instance; nothing answers on it between jobs, by design.
+- **Landing.** One terminal **completion record** — job id, outcome, the
+  result payload, model used, token spend, cache statistics — the harness's
+  sign-off to holden that the work was done, then exit. The exit code is the
+  coarse cross-check: if it and the completion record disagree, the job is
+  FAILED, loudly. holden owns timeout-and-kill for an instance that goes
+  quiet.
+
+Which harness and which model answer — and what is inside the image — is
+haho's business and invisible to holden; haho defines itself in its own repo,
+not here. The current `spawn.rs` subprocess is the degenerate first
+implementation of this shape (birth and landing, no queryable descent), so
+nothing blocks on haho maturing.
 
 holden assesses; haho furnishes. holden never defines a model contract, and
 haho never learns what a ruling is: holden validates the completion record's
@@ -128,7 +140,7 @@ and a readiness check that means something:
 
 | Check | Green means |
 |-------|-------------|
-| `harness_spawnable` | the haho executable resolves and a no-op spawn round-trips; there is no resident harness to ask, so health here means "the last N spawns completed sanely," a statistic holden keeps |
+| `harness_spawnable` | the harness image resolves and a no-op spawn round-trips; between jobs there is no instance to ask, so standing health here means "the last N spawns completed sanely," a statistic holden keeps — during a job, holden asks the living instance directly |
 | `delightd_reachable` | the roster endpoint answers; holden can resolve consumers |
 | `ledger_writable` | the rulings directory accepts a write |
 | `publisher_ready` | GitHub API reachable for status posting; if not, holden serves but reports DEGRADED, loudly — rulings queue rather than vanish |
