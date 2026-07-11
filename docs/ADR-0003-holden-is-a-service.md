@@ -8,6 +8,9 @@
   where it lives, because we outgrew the original mechanics, not the ideas.
 - Naming: holden catches diffs before they go over the cliff. That is the whole
   job description, and the repo is named for it.
+- Companions: haho `docs/haho-rfc.md` (the job contract, hahod, chutes, lanes —
+  this ADR consumes those definitions rather than restating them) and haho
+  `docs/speedy-rfc.md` (rulings are its null case: `FINISH`, no deadline).
 
 ## Summary
 
@@ -20,11 +23,12 @@ that spine carries forward unchanged. What we outgrew is the mechanics around
 it: invocation only by a human at this keyboard, a model reached only as a
 hardwired subprocess, no way for anything else on the mesh to request a ruling
 or observe one happening. holden becomes a persistent service — alive,
-heartbeating, containerized — that spins up an ephemeral harness (haho) per
-unit of work, with two protobuf contract surfaces: an inbound ruling surface
-that holden owns, and an invocation contract for the harness that haho owns
-and holden merely consumes. The harness does the job with whatever is inside
-it, reports completion, and exits.
+heartbeating, containerized — with two protobuf contract surfaces: an inbound
+ruling surface that holden owns, and the haho job contract (`haho.job.v1`,
+defined in haho's RFC), which haho owns and holden merely consumes. Each
+assessment is one haho job: an ephemeral chute executes it with whatever
+model the spec names, reports completion, and is gone; holden never touches
+a model directly.
 
 ## What ADR-0001 got right, kept verbatim
 
@@ -61,25 +65,22 @@ and judgment stored in a transcript is judgment lost. That ruling stands.
 
 holden-the-service holds **no judgment context**. The resident process is
 dispatch and bookkeeping: it accepts ruling requests, assembles inputs (as
-`assemble.rs` does today), spawns a *fresh, ephemeral* haho per request with
-the arguments for that one job, validates what comes back against the ruling
-schema, writes the ledger, posts the status, and emits lifecycle events. The
-haho lives exactly as long as its job: born with the work, does it with
-whatever model is inside it, reports completion, exits. Freshness is thereby
-enforced by process lifetime rather than by discipline — a harness that no
-longer exists cannot carry context into the next ruling. What stays resident
-is plumbing; what stays ephemeral is judgment. A holden that has been up for a
+`assemble.rs` does today), submits one job to haho per request, validates
+what comes back against the ruling schema, writes the ledger, posts the
+status, and emits lifecycle events. The chute that executes the job lives
+exactly as long as the job — that is haho's guarantee, enforced by its
+resident daemon (hahod), not by holden's discipline: a chute that no longer
+exists cannot carry context into the next ruling. What stays resident is
+plumbing; what stays ephemeral is judgment. A holden that has been up for a
 month rules exactly as a holden started this morning.
 
-holden runs as a host-level operator container, on the delightd precedent and
-for a parallel reason: delightd lives host-side because it drives the cluster;
-holden lives host-side because the harness's work happens where the models
-live, and some of those models run on the workstation's metal, out of any
-fleet pod's reach. The spawn seam is expected to be container-per-job: the
-harness ships as a baked image, so every spawn starts from the same known
-root — the job's materials are simply *there* — and killing a job is killing
-a container, not chasing a pid. A dirty harness is impossible because there is
-no harness left to be dirty.
+holden runs as a host-level operator container, on the delightd precedent.
+Its silicon story is deliberately empty: holden reaches models only through
+hahod's loopback API, so nothing in holden needs Metal, the ANE, or an Apple
+framework, and it containerizes cleanly. It stays host-level rather than
+running as a fleet pod for delightd's own reason — a gate that rules every
+merge on the fleet's repos must not be supervised by the thing it gates —
+and because hahod's API binds loopback on the host.
 
 ## Decision 2 — Two contract surfaces, two owners
 
@@ -103,41 +104,34 @@ Bus emission (Kafka) is explicitly a later seam — kafka-svc owns bus contracts
 and wiring holden into the bus is a separate decision this ADR names rather
 than smuggles.
 
-**Outbound — the haho invocation contract, owned by haho.** An instance of the
-harness lives exactly one job, and the contract covers its three moments, all
-messages generated from haho's protos so the wire stays the enforcer:
+**Outbound — the haho job contract (`haho.job.v1`), owned by haho.** holden
+is a haho requestor, and deliberately the simplest one haho's RFC names. Per
+assessment:
 
-- **Birth.** holden spawns the instance with a proto-defined job spec on
-  stdin: everything this one assessment needs, and nothing else.
-- **Descent.** The work can take a long time, so a living instance is
-  queryable: it exposes a status endpoint for its lifetime — "still here,
-  still working," with progress — and holden records the instance's address at
-  spawn and relays what it learns onto `WatchRulings`. The endpoint's identity
-  dies with the instance; nothing answers on it between jobs, by design.
-- **Landing.** One terminal **completion record** — job id, outcome, the
-  result payload, model used, token spend, cache statistics — the harness's
-  sign-off to holden that the work was done, then exit. The exit code is the
-  coarse cross-check: if it and the completion record disagree, the job is
-  FAILED, loudly. holden owns timeout-and-kill for an instance that goes
-  quiet.
+- holden opens a session and submits **one job** through the haho client
+  (`haho new` / `haho task` / `haho status` are the operator-facing verbs;
+  holden links the Go client over hahod's loopback API). The JobSpec is
+  `WHOLE_OR_ERROR` with `allow_partial` pinned false — a ruling prompt is
+  never chunked, and a partial ruling is not a ruling — on the API lane,
+  riding `FINISH` with no deadline: rulings are speedy's null case, and none
+  of the drop discipline ever touches them.
+- While the job runs, holden relays haho's JobEvents onto `WatchRulings`.
+  Liveness of in-flight work is haho's to prove — hahod's heartbeats and the
+  hm lease chain mean a hung assessment surfaces as a lapsed lease — so
+  holden carries no watchdog of its own; it consumes the events and waits.
+- The JobCompletion's payload is validated against the ruling schema on
+  holden's side of the contract. A completion that does not parse as a
+  ruling is a refusal to be handled, never output to be trusted.
 
-**Instances are plural.** One instance per workload, and arbitrarily many
-workloads in flight: nothing in the contract distinguishes the first instance
-from the tenth, because each is born with its own job, its own address, and
-its own landing. Isolation is per-container; the only state instances share is
-the externalized kind (the cache), which is exactly why the cache lives in
-surrealdb and not in the instance. What bounds fan-out is dispatch policy, not
-the contract: an API-backed model tolerates wide fan-out, a metal-bound model
-is a contended resource, so the spawner holds per-backend concurrency budgets
-in config and queues past them. Nor is the harness holden-exclusive — anything
-on the mesh with work to fan out (magpie is the obvious next customer) spawns
-instances under the same contract; holden assumes nothing about being alone.
+Concurrent rulings are simply concurrent jobs: admission control and lane
+budgets are hahod's, and holden holds no dispatch logic at all. Nor is haho
+holden-exclusive — anything on the mesh with model work submits under the
+same contract; holden assumes nothing about being alone.
 
-Which harness and which model answer — and what is inside the image — is
-haho's business and invisible to holden; haho defines itself in its own repo,
-not here. The current `spawn.rs` subprocess is the degenerate first
-implementation of this shape (birth and landing, no queryable descent), so
-nothing blocks on haho maturing.
+Which model answers, and how the chute executes, is haho's business and
+invisible to holden; haho defines itself in its own RFC, not here. The
+current `spawn.rs` claude-CLI subprocess survives only as the pre-haho shim,
+until hahod serves.
 
 holden assesses; haho furnishes. holden never defines a model contract, and
 haho never learns what a ruling is: holden validates the completion record's
@@ -152,7 +146,7 @@ and a readiness check that means something:
 
 | Check | Green means |
 |-------|-------------|
-| `harness_spawnable` | the harness image resolves and a no-op spawn round-trips; between jobs there is no instance to ask, so standing health here means "the last N spawns completed sanely," a statistic holden keeps — during a job, holden asks the living instance directly |
+| `hahod_reachable` | hahod answers its health endpoint and admits work; in-flight chute liveness is carried by hahod's heartbeats and the hm lease chain, so holden never polls a chute — a lapsed lease is the hung-assessment alarm |
 | `delightd_reachable` | the roster endpoint answers; holden can resolve consumers |
 | `ledger_writable` | the rulings directory accepts a write |
 | `publisher_ready` | GitHub API reachable for status posting; if not, holden serves but reports DEGRADED, loudly — rulings queue rather than vanish |
@@ -169,9 +163,9 @@ holden is considered stable and in prod. holden carries no credentials; the harn
 2. Core refactor: the existing crate's assemble/rule/publish path is wrapped by
    the service; the CLI remains as a thin client of the same core (rehearsal
    and hostile-network modes keep working).
-3. `spawn.rs` is reshaped into the invocation-contract client: proto job spec
-   on stdin, event/completion lines on stdout. The current claude-CLI
-   subprocess is implementation one of that shape.
+3. `spawn.rs` is replaced by the haho client: open a session, submit the
+   JobSpec, relay events, take the completion. The claude-CLI subprocess
+   survives only as the shim behind that seam until hahod serves.
 4. haho graduates dev to prod. holden and haho are separate services and
    separate projects — but they share a fate in this effort to bring holden to
    production: a prod service does not take a hard dependency on a dev repo's
