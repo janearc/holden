@@ -1,7 +1,10 @@
 # ADR 0003: holden is a service
 
-- Status: DRAFT (awaiting operator ratification)
-- Date: 2026-07-10
+- Status: CONTINUED — the design reference is the holden RFC in the haho
+  tranche (janearc/haho `docs/holden-rfc.md`), where holden, haho, and speedy
+  ratify as one piece. This ADR remains the decision record for the
+  service-ization itself; where the two disagree, the RFC wins.
+- Date: 2026-07-10 (continued 2026-07-12)
 - Deciders: Max (operator), Claude (agent — drafted by Fable 5)
 - Revises: ADR-0001 (coding-process gates), Decision 6 mechanics. ADR-0001's
   principles are not touched; this document changes how the judge is invoked and
@@ -10,7 +13,7 @@
   job description, and the repo is named for it.
 - Companions: haho `docs/haho-rfc.md` (the job contract, hahod, chutes, lanes —
   this ADR consumes those definitions rather than restating them) and haho
-  `docs/speedy-rfc.md` (rulings are its null case: `FINISH`, no deadline).
+  `docs/speedy-rfc.md` (rulings are not speedy work; the holden RFC says why).
 
 ## Summary
 
@@ -112,9 +115,9 @@ assessment:
   (`haho new` / `haho task` / `haho status` are the operator-facing verbs;
   holden links the Go client over hahod's loopback API). The JobSpec is
   `WHOLE_OR_ERROR` with `allow_partial` pinned false — a ruling prompt is
-  never chunked, and a partial ruling is not a ruling — on the API lane,
-  riding `FINISH` with no deadline: rulings are speedy's null case, and none
-  of the drop discipline ever touches them.
+  never chunked, and a partial ruling is not a ruling — on the api lane.
+  A ruling is not speedy work: no recipe, no dial, one requestor-minted
+  job. The holden RFC states the boundary precisely.
 - While the job runs, holden relays haho's JobEvents onto `WatchRulings`.
   Liveness of in-flight work is haho's to prove — hahod's heartbeats and the
   hm lease chain mean a hung assessment surfaces as a lapsed lease — so
@@ -177,7 +180,7 @@ holden is considered stable and in prod. holden carries no credentials; the harn
 Submit a ruling for a real PR through `SubmitRuling`, watch the lifecycle on
 `WatchRulings`, and observe the `ruling/ratify` status appear on the PR's head
 SHA and the ruling row appear in the ledger. Requestor talks to holden, holden
-talks to the harness, the gate comes out. If that flow cannot be demonstrated,
+talks to hahod, the gate comes out. If that flow cannot be demonstrated,
 this design is not done, whatever the coverage number says.
 
 ## Carried, not solved here

@@ -11,6 +11,16 @@ It is the T3 judgment gate of ADR-0001 (Decision 6), amended by ADR-0002
 (doc pairing binds through the judge). Doctrine follows the ADR chain; where a
 later ADR conflicts with an earlier one, the later ADR governs.
 
+## Where the design lives
+
+holden's service design is the holden RFC in the haho repository
+(janearc/haho, `docs/holden-rfc.md`), which continues ADR-0003 in this
+repo. The venue is deliberate: holden, haho, and speedy were converged as
+one piece — one vocabulary, one review, one ratification — and a design
+cut as a tranche is maintained as a tranche. The ADR chain in `docs/`
+remains this repo's decision record; the RFC is the design reference, and
+where the two disagree, the RFC wins.
+
 ## What the judge is not
 
 The judge is a model, and a model is not deterministic. ADR-0001 says this
