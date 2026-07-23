@@ -1,0 +1,16 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  ignore_only:
+    # holden.ruling.v1 keeps unprefixed enum values (RATIFY, ON_MESH):
+    # the wire spelling corresponds mechanically to the YAML ledger's
+    # kebab-case values, and VERDICT_RATIFY would bury that. Same
+    # precedent as haho's job contract.
+    ENUM_VALUE_PREFIX:
+      - proto/holden/ruling/v1/ruling.proto
+breaking:
+  use:
+    - FILE

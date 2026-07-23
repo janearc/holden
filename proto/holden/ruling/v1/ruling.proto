@@ -1,0 +1,158 @@
+// holden.ruling.v1 — the inbound ruling surface, owned by holden
+// (ADR-0003 Decision 2; the holden RFC section 5 in janearc/haho).
+//
+// The Ruling message is the protobuf twin of the ADR-0001 Decision 6
+// schema as implemented in src/ruling.rs — same fields, same values, same
+// invariants. Two facts about the twin, stated rather than smuggled:
+//
+//   - SPELLING. Proto identifiers cannot spell kebab-case, so the wire
+//     speaks these declared names (protojson and the rust-serde gen both
+//     serialize enum values verbatim) while the YAML ledger keeps
+//     ruling.rs's kebab-case rendering: RATIFY ~ ratify, ON_MESH ~
+//     on-mesh, NEEDS_CLARIFICATION ~ needs-clarification, SILENT_DRIFT ~
+//     silent-drift. Same schema, two renderings, mechanical
+//     correspondence; the ledger format does not change.
+//
+//   - STRICTNESS. ruling.rs's construction property (deny_unknown_fields:
+//     an off-spec ruling does not deserialize) is NOT inherited from the
+//     generated wire types, which are deliberately lenient like the rest
+//     of the mesh's rust-serde gen. holden enforces strictness and the
+//     validate() invariants at its own boundary, exactly as it does for
+//     YAML today. The wire carries; holden judges.
+//
+// The service verbs (SubmitRuling / GetRuling / WatchRulings) are message
+// pairs here, not a service block: holden serves loopback-adjacent HTTP
+// with protojson bodies, on hahod's precedent, and the rust-serde gen
+// emits data types, not stubs. Watch semantics day one are polling
+// GetRuling; RulingEvent is the shape events take when a push surface
+// (or the bus seam) lands.
+//
+// One field goes beyond the ADR's list and is flagged for review, not
+// slipped in: RulingRequest.request_id, the idempotency key — fleet code
+// presumes distribution and mutations are idempotent, and a resubmitted
+// request must be one fact, not two rulings.
+
+syntax = "proto3";
+
+package holden.ruling.v1;
+
+option go_package = "github.com/janearc/holden/gen/rulingpb;rulingpb";
+
+import "google/protobuf/timestamp.proto";
+
+// SubmitRuling: what a requestor sends. Everything else the judge sees is
+// assembled by holden (diff, docs, ledger, consumer scan — the bundle),
+// which is why the request is deliberately thin.
+message RulingRequest {
+  string request_id = 1;      // requestor-assigned idempotency key; the
+                              // same request submitted twice is one fact
+  string repo = 2;            // the repository under judgment (owner/name)
+  uint32 pr_number = 3;
+  repeated string includes = 4; // extra head-content paths for the bundle:
+                                // the supply side of a needs-clarification
+                                // ruling, exactly like the CLI's --include
+}
+
+// SubmitRuling: what comes back immediately.
+message RulingHandle {
+  string ruling_id = 1;       // assigned by holden at receipt
+}
+
+// The lifecycle a ruling moves through (ADR-0003 Decision 2). VERDICT
+// means the judge answered and validation is in progress; PUBLISHED means
+// ledger written and status posted; FAILED carries its reason in the
+// status or event detail.
+enum RulingState {
+  RULING_STATE_UNSPECIFIED = 0;
+  RECEIVED         = 1;
+  INPUTS_ASSEMBLED = 2;
+  JUDGE_SPAWNED    = 3;
+  VERDICT          = 4;
+  REFUSED_RETRY    = 5; // one retry, with the refusal appended; a second
+                        // refusal makes the ruling ABSENT and the state FAILED
+  PUBLISHED        = 6;
+  FAILED           = 7;
+}
+
+// GetRuling: the ruling document, or its in-flight state.
+message RulingStatus {
+  string ruling_id = 1;
+  RulingState state = 2;
+  Ruling ruling = 3;          // set once PUBLISHED; absent in flight
+  string failure_reason = 4;  // set only when state is FAILED, and specific
+}
+
+// WatchRulings: one lifecycle observation. holden emits; requestors and
+// health-watchers observe instead of polling, once a push surface exists.
+message RulingEvent {
+  string ruling_id = 1;
+  google.protobuf.Timestamp at = 2;
+  RulingState state = 3;
+  string detail = 4;          // human-readable specifics; never the bundle,
+                              // never a secret
+}
+
+// The ruling itself — ADR-0001 Decision 6, protobuf rendering. The
+// invariants shape cannot express live in holden's validate(), unchanged:
+// non-empty diff_ref/judge_instance/shape_justification, a bounce must
+// state why, consumer evidence must cite file:line, and the ledger id is
+// the harness's to assign (a judge's output never carries it; a written
+// ledger entry always does).
+// Enums are top-level, not nested: the rust-serde emitter is deliberately
+// narrow (no nested types), and observability.v1 set the precedent. Value
+// names are unique across the package, so no scoping is lost.
+
+enum Verdict {
+  VERDICT_UNSPECIFIED = 0;
+  RATIFY              = 1; // ~ "ratify" in the YAML ledger
+  BOUNCE              = 2; // ~ "bounce"
+  NEEDS_CLARIFICATION = 3; // ~ "needs-clarification"
+}
+
+enum ShapeVerdict {
+  SHAPE_VERDICT_UNSPECIFIED = 0;
+  ON_MESH     = 1; // ~ "on-mesh"
+  WRONG_SHAPE = 2; // ~ "wrong-shape"
+}
+
+enum DocContentAgreement {
+  DOC_CONTENT_AGREEMENT_UNSPECIFIED = 0;
+  AGREE    = 1; // ~ "agree"
+  DISAGREE = 2; // ~ "disagree"
+  UNCLEAR  = 3; // ~ "unclear"
+}
+
+enum Classification {
+  CLASSIFICATION_UNSPECIFIED = 0;
+  ADDITIVE     = 1; // ~ "additive"
+  BREAKING     = 2; // ~ "breaking"
+  SILENT_DRIFT = 3; // ~ "silent-drift"
+}
+
+message Ruling {
+  string diff_ref = 1;        // commit sha or PR url this ruling binds to
+  string judge_instance = 2;  // ephemeral judge id; never reused
+  google.protobuf.Timestamp fired_at = 3;
+  Verdict verdict = 4;
+  // every divergence from the design doc, ratified-or-not, with evidence
+  repeated Divergence divergences = 5;
+  ShapeVerdict shape_verdict = 6;
+  string shape_justification = 7;
+  repeated ConsumerImpact consumer_impact = 8;
+  // advisory (ADR-0001 D6): never blocks on its own
+  DocContentAgreement doc_content_agreement = 9;
+  // assigned by the harness on ledger write; empty on a judge's output
+  string ledger_entry_id = 10;
+}
+
+message Divergence {
+  string claim = 1;
+  bool necessary = 2;
+  string justification = 3;
+}
+
+message ConsumerImpact {
+  string consumer = 1;
+  Classification classification = 2;
+  string evidence = 3;        // a citation, not an assertion: must name file:line
+}
