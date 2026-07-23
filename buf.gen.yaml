@@ -1,0 +1,15 @@
+version: v2
+# holden consumes its own contract as a plain serde crate — no prost, no
+# protobuf runtime — via the mesh's protoc-gen-rust-serde (lives in
+# big-little-mesh cmd/, installed with `go install`; the same unforked
+# binary every repo runs, per its own documentation). The wire is
+# protojson, matching the mesh convention. Go consumers of this contract
+# vendor-generate on their side, per practice; holden commits its gen so
+# gen-freshness (regenerate == committed) is checkable, on haho's
+# precedent.
+plugins:
+  - local: protoc-gen-rust-serde
+    out: gen/rust
+    opt:
+      - crate_name=holden-contracts
+      - packages=holden.ruling.v1
