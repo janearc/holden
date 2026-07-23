@@ -11,6 +11,13 @@ serde_yaml = "0.9"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
+# the wire types: holden.ruling.v1 as the generated plain-serde crate
+holden-contracts = { path = "gen/rust" }
+# holdend's serving stack: the ecosystem standard, per fleet convention
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json"] }
 
 [profile.release]
 # a gate binary should be boring and reproducible; nothing here is hot-path

@@ -6,7 +6,7 @@
 // pure and unit-tested. network/API failures are loud errors — the harness
 // fails closed, it never rules on partial inputs.
 
-use crate::Config;
+use crate::core::Config;
 use anyhow::{anyhow, bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -142,6 +142,44 @@ fn fetch_roster(
 // skip: delightd is the source of truth, and a roster the workstation
 // contradicts is an inconsistency to fix, not to swallow (the fail-open debt
 // PILOT_ROSTER carried).
+// the roster's path contract: a leading `~/` (or a bare `~`) is
+// workstation-home-relative -- delightd serves delight.yaml's rows
+// verbatim, and the rows use `~` on purpose so a layout relocation does
+// not rot the roster. anything else is literal. expansion uses the home
+// the config boundary resolved, never a guess.
+fn expand_roster_path(path: &str, home: &str) -> PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => PathBuf::from(home).join(rest),
+        None if path == "~" => PathBuf::from(home),
+        None => PathBuf::from(path),
+    }
+}
+
+// resolve one project name to its checkout via delightd's roster — the
+// service's front door uses this so a requestor names repos the fleet's
+// way (owner/name, or the bare project name), never a filesystem path.
+// delightd down, an unrostered repo, or a roster/workstation disagreement
+// are each a loud refusal, per the ratified posture.
+pub fn resolve_repo_path(cfg: &Config, repo: &str) -> Result<PathBuf> {
+    let roster = fetch_roster(&cfg.delightd_url, |url| {
+        run(Command::new("curl").args(["-fsS", url]))
+    })?;
+    let name = repo.rsplit('/').next().unwrap_or(repo);
+    let entry = roster.iter().find(|e| e.name == name).ok_or_else(|| {
+        anyhow!("repo {repo} is not on delightd's roster; the fleet does not know it")
+    })?;
+    let dir = expand_roster_path(&entry.path, &cfg.home);
+    if !dir.is_dir() {
+        bail!(
+            "roster path for {} is not on disk: {} — delightd and the workstation \
+             disagree; a roster inconsistency is a finding, not a skip",
+            entry.name,
+            entry.path
+        );
+    }
+    Ok(dir)
+}
+
 fn consumer_dirs(
     roster: &[RosterEntry],
     judged_name: &str,
@@ -152,16 +190,7 @@ fn consumer_dirs(
         if entry.name == judged_name {
             continue;
         }
-        // the roster's path contract: a leading `~/` (or a bare `~`) is
-        // workstation-home-relative -- delightd serves delight.yaml's rows
-        // verbatim, and the rows use `~` on purpose so a layout relocation
-        // does not rot the roster. anything else is literal. expansion here
-        // uses the home the config boundary resolved, never a guess.
-        let dir = match entry.path.strip_prefix("~/") {
-            Some(rest) => PathBuf::from(home).join(rest),
-            None if entry.path == "~" => PathBuf::from(home),
-            None => PathBuf::from(&entry.path),
-        };
+        let dir = expand_roster_path(&entry.path, home);
         if !dir.is_dir() {
             bail!(
                 "roster path for {} is not on disk: {} — delightd and the workstation \
@@ -773,7 +802,10 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
         }];
         let got = consumer_dirs(&roster, "delightd", &home.to_string_lossy()).unwrap();
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].1, real, "~/ did not expand against the supplied home");
+        assert_eq!(
+            got[0].1, real,
+            "~/ did not expand against the supplied home"
+        );
     }
 
     #[test]
