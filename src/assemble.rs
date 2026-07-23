@@ -6,7 +6,7 @@
 // pure and unit-tested. network/API failures are loud errors — the harness
 // fails closed, it never rules on partial inputs.
 
-use crate::Config;
+use crate::core::Config;
 use anyhow::{anyhow, bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -773,7 +773,10 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
         }];
         let got = consumer_dirs(&roster, "delightd", &home.to_string_lossy()).unwrap();
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].1, real, "~/ did not expand against the supplied home");
+        assert_eq!(
+            got[0].1, real,
+            "~/ did not expand against the supplied home"
+        );
     }
 
     #[test]

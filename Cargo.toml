@@ -11,6 +11,8 @@ serde_yaml = "0.9"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
+# the wire types: holden.ruling.v1 as the generated plain-serde crate
+holden-contracts = { path = "gen/rust" }
 
 [profile.release]
 # a gate binary should be boring and reproducible; nothing here is hot-path
