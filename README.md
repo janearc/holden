@@ -1,15 +1,24 @@
-# judge
+# holden
 
-Every merge on the pilot repos (big-little-mesh, delightd, magpie) needs a ruling
-from a judge that did not write the diff. This tool is how a ruling happens: it
-gathers everything a fresh judge is allowed to consider, spawns one, refuses any
-reply that does not survive the ruling schema, writes the accepted ruling into
-the active sprint's ledger, and posts the `ruling/ratify` commit status that
-branch protection requires. One invocation, one judge, one ruling.
+originally, i was using a tool called 'the judge' in my sprints repository to conduct
+reviews on code that i was building in three steps:
 
-It is the T3 judgment gate of ADR-0001 (Decision 6), amended by ADR-0002
-(doc pairing binds through the judge). Doctrine follows the ADR chain; where a
-later ADR conflicts with an earlier one, the later ADR governs.
+* first, a check to see that what is built comports with what the sprint said we were doing
+* second, a check to make sure that the code built (including the comments) comports with what the docs say it does
+* third, an adversarial code review, usually by spawning `claude`
+
+this three-step review is then fed back up to myself and the dispatching agent i'm working with,
+and then we talk about the severity and how to address it. to be clear, the output of the judge is
+used as a ci gate for my repositories on github.
+
+the name "the judge" sounds needlessly adversarial, like it exists to hate on your code, so i tried
+to find a name that isn't so terrible. "judge holden" came to mind, but that's also kind of terrible
+and so i just decided that it will be called "holden" like "holden ur diffs" and i also think that
+the protag from the expanse was also named holden, so maybe it's not so terrible sounding. but this
+is how we got to the name.
+
+we chose to do this because it was necessary to have a reviewer that was not the original author
+of the code, and when i started doing this with opus, opus was not able to review its own code.
 
 ## Where the design lives
 
@@ -34,14 +43,14 @@ truth rather than a reviewed opinion, that thing is defective — not the judge.
 ## Invocation
 
 ```
-judge <repo-path> <pr-number> [flags]
-judge --validate-ruling <file>
+holden <repo-path> <pr-number> [flags]
+holden --validate-ruling <file>
 ```
 
 Every environment-derived fact resolves once at startup through a single
 config boundary: flag over environment variable over default. The config
 carries no credential of any kind — the spawned `claude` CLI owns auth
-(subscription), so a secret never enters the judge's config, environment
+(subscription), so a secret never enters the holden's config, environment
 handling, or docs.
 
 | Flag | What it does |
@@ -59,18 +68,18 @@ handling, or docs.
 
 ## The bundle
 
-The judge is never fed the writer's session. It receives exactly these inputs,
+holden is never fed the writer's session. It receives exactly these inputs,
 assembled fresh per invocation, and is instructed to cite only from them:
 
 | Input | Source | Why it is required |
 |-------|--------|--------------------|
 | The diff | `gh pr diff` | The thing under judgment. Empty diff = refuse to run. |
 | Head sha + tree | `gh` / `git ls-tree` | Existence evidence. A doc claim like "register.py exists" is citable against the tree; "trust me" is not. |
-| Design docs | repo `docs/*.md`, `DESIGN.md`, `VISION.md`, `README.md` | The goalpost (ADR-0001 D8). A repo with no design artifact CANNOT be judged — that is a loud error, not a default pass. |
+| Design docs | repo `docs/*.md`, `DESIGN.md`, `VISION.md`, `README.md` | The goalpost (ADR-0001 D8). A repo with no design artifact CANNOT be assessed — that is a loud error, not a default pass. |
 | Implicated docs | repo `.docpairs` (literal `<path-prefix> -> <doc>`) | ADR-0002: a doc paired to a changed path-prefix rides in, and a diff that falsifies it without updating it is a bounce. A fired pair naming a missing doc is a loud error; a glob metacharacter in a prefix is refused (the map must migrate to literal prefixes). Absent `.docpairs` = no pairings. |
-| Contracts touched | `.proto` files named in the diff | The wire is the boundary-enforcer; the judge reads what changed on it. |
-| The ruling ledger | every `rulings/*.yaml` across all sprint dirs | The judge's only persistent memory. Fresh instances + a durable ledger replace a resident judge (struck in Sprint 0: long-lived sessions rot). |
-| Consumer scan | `rg` for changed proto message names across delightd's live roster (`GET /projects`; each entry's `path` names the checkout) | Consumer impact must be cited, not asserted. delightd unreachable = the judge refuses to run: the fleet's orchestration is down, which is a production problem to fix before judging anything. A roster path missing on disk is equally loud — delightd and the workstation disagreeing is a finding, not a skip. Roster path contract: a `path` beginning `~/` (or a bare `~`) is workstation-home-relative — delightd serves `delight.yaml`'s rows verbatim, the rows use `~` so a layout relocation does not rot the roster, and the judge expands against the HOME its config boundary resolved (judge and delightd share a workstation by construction). Anything else is literal. |
+| Contracts touched | `.proto` files named in the diff | The wire is the boundary-enforcer; holden reads what changed on it. |
+| The ruling ledger | every `rulings/*.yaml` across all sprint dirs | holden's only persistent memory. Fresh instances + a durable ledger replace a resident holden (struck in Sprint 0: long-lived sessions rot). |
+| Consumer scan | `rg` for changed proto message names across delightd's live roster (`GET /projects`; each entry's `path` names the checkout) | Consumer impact must be cited, not asserted. delightd unreachable = holden refuses to run: the fleet's orchestration is down, which is a production problem to fix before judging anything. A roster path missing on disk is equally loud — delightd and the workstation disagreeing is a finding, not a skip. Roster path contract: a `path` beginning `~/` (or a bare `~`) is workstation-home-relative — delightd serves `delight.yaml`'s rows verbatim, the rows use `~` so a layout relocation does not rot the roster, and holden expands against the HOME its config boundary resolved (holden and delightd share a workstation by construction). Anything else is literal. |
 | `--include` files | `git show HEAD_SHA:path` | Judge-requested evidence. A named file missing at head is a loud error — wrong evidence supplied silently would corrupt the ruling. |
 
 ## The ruling
@@ -80,7 +89,7 @@ The reply must be a single YAML document matching the schema in
 divergences with justifications, a shape verdict, consumer impact with
 file:line citations. `deny_unknown_fields` and real enums mean an off-spec
 ruling does not deserialize; `validate()` adds what shape cannot express (a
-bounce must state why; the judge MUST NOT assign its own ledger id).
+bounce must state why; holden MUST NOT assign its own ledger id).
 
 An invalid reply gets ONE retry with the refusal appended. Still invalid: the
 ruling is ABSENT — no ledger entry, no status, nonzero exit. There is no third
@@ -130,10 +139,10 @@ The bundle is untrusted text. Design docs from public repos ride in it, and
 anything in the prompt can try to manipulate the process reading it. Two
 consequences, one closed and one open:
 
-- CLOSED: the spawned judge runs with `--tools ""` — no tools at all. Every
+- CLOSED: the spawned holden runs with `--tools ""` — no tools at all. Every
   input it may consider is already in the prompt and its only output is YAML,
   so bundle text cannot steer it into executing anything as the operator.
-  Verified empirically (2026-07-02): a locked-down judge cannot read a nonce
+  Verified empirically (2026-07-02): a locked-down holden cannot read a nonce
   file. It may still PLAY-ACT tool calls as inert text rather than refuse —
   one more reason a reply only counts if it survives the schema.
 - OPEN, permanently: bundle text can still try to steer the VERDICT ("this
@@ -150,9 +159,9 @@ failures and what they mean:
   need a home.
 - `T3 cannot run without a design artifact` — the repo has no docs. That is a
   finding about the repo.
-- `ruling ABSENT: refused twice` — the judge could not produce a schema-valid
+- `ruling ABSENT: refused twice` — holden could not produce a schema-valid
   ruling. Read the two refusals in the error; the schema is not negotiable.
-- A wedged judge hangs forever: there is NO timeout in v0, by decision — runs
+- A wedged holden hangs forever: there is NO timeout in v0, by decision — runs
   are operator-watched, and a human ctrl-c beats a silent kill into a
   half-ruling. Revisit when invocations stop being watched.
 - Network failures (`gh`, status posts) are loud errors. The environment is
@@ -166,13 +175,13 @@ failures and what they mean:
 ## Maintenance path
 
 - Changes land branch -> PR -> operator line-review, like everything in this
-  repo. The tool never rules on its own diffs: the operator is the judge's
-  judge, and that is the writer-is-not-judge rule applied to the judge itself.
+  repo. The tool never rules on its own diffs: the operator is holden's
+  judge, and that is the writer-is-not-judge rule applied to holden itself.
 - Before push: `cargo fmt --check`, `cargo clippy` clean, `cargo test` green.
   A required CI enforcing exactly that is proposed and awaiting the operator's
   call (Sprint 7, Phase B).
 - Doctrine lives in two places that MUST move together: the ADRs, and the
-  prompt constant in `src/spawn.rs` (`build_prompt`). An ADR that amends judge
+  prompt constant in `src/spawn.rs` (`build_prompt`). An ADR that amends holden
   doctrine includes the prompt edit in its own diff. Generating the prompt's
   schema section from the serde types is sized-but-not-built (Sprint 7 review,
   spawn.rs:27 thread).
@@ -194,7 +203,7 @@ Named at the Sprint 7 line-review; each is carried deliberately, not forgotten:
 - The file:line citation mandate is schema-enforced only for consumer impact;
   divergence justifications are checked non-empty, not cited.
 - Consumer hits truncate at 20 per repo with no marker.
-- `fired_at` and the echoed instance id are the judge's word; the harness
+- `fired_at` and the echoed instance id are holden's word; the harness
   could stamp both, as it already does the ledger id.
 - Status descriptions embed the ledger path; GitHub caps descriptions at 140
   characters and long names will brush it.
