@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::{assemble, lane, publish, ruling, spawn};
+use crate::{assemble, bundle, lane, publish, ruling, spawn};
 
 // the single config boundary (ratified 2026-07-03): every environment-
 // derived fact resolves ONCE, flag over env over default, into this
@@ -19,6 +19,8 @@ use crate::{assemble, lane, publish, ruling, spawn};
 pub struct Config {
     pub delightd_url: String,
     pub sprints_root: String,
+    // where bundle bentos are recorded (RFC section 5); the corpus root.
+    pub bundle_root: String,
     pub judge_cmd: String,
     pub model: Option<String>,
     // the workstation home, resolved once here per the boundary above: the
@@ -77,6 +79,11 @@ pub struct RunOutcome {
     // bail; the ruling already earned its merge.
     pub lane_degraded: Option<(String, String)>,
     pub status_posted: bool,
+    // the recorded bundle bento, when recording succeeded.
+    pub bundle_path: Option<PathBuf>,
+    // Some(why) when recording or the ruling link degraded — the corpus
+    // lost evidence; loud like the lane, and never a block on the gate.
+    pub bundle_degraded: Option<String>,
 }
 
 // run one ruling to its landing. `progress` is told each stage as it
@@ -94,6 +101,16 @@ pub fn run(
     let inputs = assemble::assemble(repo_path, pr_number, cfg, &opts.includes)?;
     progress(Stage::InputsAssembled);
 
+    // record the bundle bento before any judgment, so a refused ruling
+    // still leaves its inputs in the corpus (a refusal is exactly the
+    // evidence sprints 52 wants). recording failure degrades loud, never
+    // blocks: the gate's job is the ruling, and the miss rides the outcome.
+    let (bundle_path, mut bundle_degraded) =
+        match bundle::record(Path::new(&cfg.bundle_root), &inputs) {
+            Ok(dir) => (Some(dir), None),
+            Err(e) => (None, Some(format!("record: {e:#}"))),
+        };
+
     let mut doc = match &opts.decide {
         Decide::Overrule { reason } => overrule_ruling(&inputs, reason),
         Decide::FreshJudge => {
@@ -109,6 +126,15 @@ pub fn run(
 
     let ledger_path =
         publish::write_ledger(sprints_root, &inputs.repo_name, inputs.pr_number, &mut doc)?;
+
+    // the ledger row exists; link it into the bundle so the corpus knows
+    // which recorded inputs this ruling was rendered from. best-effort,
+    // loud on failure, same posture as the recording itself.
+    if let Some(dir) = &bundle_path {
+        if let Err(e) = bundle::link_ruling(dir, &doc) {
+            bundle_degraded = Some(format!("ruling link: {e:#}"));
+        }
+    }
 
     let mut lane_degraded = None;
     if !opts.skip_lane {
@@ -142,6 +168,8 @@ pub fn run(
         ledger_path,
         lane_degraded,
         status_posted,
+        bundle_path,
+        bundle_degraded,
     })
 }
 

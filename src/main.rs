@@ -11,7 +11,7 @@ use anyhow::Context;
 use clap::Parser;
 
 use judge::core::{self, Config, Decide, RunOpts};
-use judge::{assemble, ruling};
+use judge::{assemble, bundle, ruling, spawn};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -22,11 +22,16 @@ struct Args {
     /// validate a ruling YAML file and exit (0 = valid, 1 = refused); no PR needed
     #[arg(long, value_name = "FILE")]
     validate_ruling: Option<String>,
+    /// replay a recorded bundle through a fresh judge: same bundle, fresh
+    /// judge, no GitHub, no delightd; the ruling lands beside the bundle
+    /// under replays/, never in the ledger, never as a status
+    #[arg(long, value_name = "BUNDLE_DIR", conflicts_with = "validate_ruling")]
+    replay: Option<String>,
     /// path to the repo checkout under judgment
-    #[arg(required_unless_present = "validate_ruling", default_value = "")]
+    #[arg(required_unless_present_any = ["validate_ruling", "replay"], default_value = "")]
     repo_path: String,
     /// pull request number to rule on
-    #[arg(required_unless_present = "validate_ruling", default_value_t = 0)]
+    #[arg(required_unless_present_any = ["validate_ruling", "replay"], default_value_t = 0)]
     pr_number: u64,
     /// operator overrule: record an overrule ruling before posting (an overrule is data)
     #[arg(long)]
@@ -37,6 +42,10 @@ struct Args {
     /// assemble and summarize the judge's inputs without spawning a judge
     #[arg(long)]
     dry_run: bool,
+    /// assemble and record the bundle bento, then exit without judging —
+    /// the corpus seeder (a dry run that persists)
+    #[arg(long, conflicts_with_all = ["dry_run", "overrule", "replay"])]
+    record_only: bool,
     /// include a file's head content in the bundle (repeatable); the supply
     /// side of a judge's needs-clarification evidence request
     #[arg(long = "include", value_name = "PATH")]
@@ -60,6 +69,9 @@ struct Args {
     /// root of the sprints repo (ledger + ruling output); flag over env JUDGE_SPRINTS_ROOT over default
     #[arg(long)]
     sprints_root: Option<String>,
+    /// root of the bundle corpus (recorded bundle bentos); flag over env JUDGE_BUNDLE_ROOT over default
+    #[arg(long)]
+    bundle_root: Option<String>,
 }
 
 fn resolve(args: &Args) -> anyhow::Result<Config> {
@@ -75,6 +87,11 @@ fn resolve(args: &Args) -> anyhow::Result<Config> {
             args.sprints_root.clone(),
             "JUDGE_SPRINTS_ROOT",
             "work/sprints",
+        )?,
+        bundle_root: core::pick_path(
+            args.bundle_root.clone(),
+            "JUDGE_BUNDLE_ROOT",
+            ".holden/bundles",
         )?,
         judge_cmd: core::pick(args.judge_cmd.clone(), "JUDGE_CMD", "claude"),
         // model has no default: absent means the CLI's own configured model.
@@ -112,10 +129,44 @@ fn main() -> anyhow::Result<()> {
     let cfg = resolve(&args)?;
     let repo = std::path::Path::new(&args.repo_path);
 
+    // replay: same bundle, fresh judge (RFC section 5). the bundle carries
+    // every input, so no GitHub and no delightd are reached; the verdict
+    // lands beside the bundle as experiment evidence — never in the ledger,
+    // never as a status. a replay cannot gate anything.
+    if let Some(dir) = &args.replay {
+        let dir = std::path::Path::new(dir);
+        let inputs = bundle::load(dir)?;
+        let spawn_cfg = spawn::SpawnCfg {
+            judge_cmd: cfg.judge_cmd.clone(),
+            model: cfg.model.clone(),
+        };
+        let (doc, yaml) = spawn::rule(&spawn_cfg, &inputs)?;
+        let out = bundle::record_replay(dir, &yaml, &doc.ruling.judge_instance)?;
+        println!(
+            "replay: verdict={:?} shape={:?} ({} pr {} @ {})",
+            doc.ruling.verdict,
+            doc.ruling.shape_verdict,
+            inputs.repo_name,
+            inputs.pr_number,
+            &inputs.head_sha[..12.min(inputs.head_sha.len())]
+        );
+        println!("recorded: {}", out.display());
+        return Ok(());
+    }
+
     if args.dry_run {
         // a human-readable audit of exactly what the judge would receive.
         let inputs = assemble::assemble(repo, args.pr_number, &cfg, &args.include)?;
         print_dry_run(&inputs);
+        return Ok(());
+    }
+
+    // the corpus seeder: assemble and record, judge nothing. the bundle has
+    // no ruling-ref, which is exactly how a reconstruction reads.
+    if args.record_only {
+        let inputs = assemble::assemble(repo, args.pr_number, &cfg, &args.include)?;
+        let dir = bundle::record(std::path::Path::new(&cfg.bundle_root), &inputs)?;
+        println!("bundle: {}", dir.display());
         return Ok(());
     }
 
@@ -138,6 +189,12 @@ fn main() -> anyhow::Result<()> {
     let outcome = core::run(&cfg, repo, args.pr_number, &opts, &mut |_stage| {})?;
 
     println!("ledger: {}", outcome.ledger_path.display());
+    if let Some(dir) = &outcome.bundle_path {
+        println!("bundle: {}", dir.display());
+    }
+    if let Some(why) = &outcome.bundle_degraded {
+        eprintln!("bundle: DEGRADED — {why}");
+    }
     if let Some((step, why)) = &outcome.lane_degraded {
         eprintln!("lane: DEGRADED — {step}: {why}");
     } else if !args.skip_lane {
@@ -163,10 +220,10 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    // exit 3: ruling written (and status posted, unless skipped) but the
-    // lane is degraded — loud and machine-legible without stalling a merge
-    // the ruling already earned.
-    if outcome.lane_degraded.is_some() {
+    // exit 3: ruling written (and status posted, unless skipped) but a
+    // durability surface degraded — the lane, or the bundle corpus — loud
+    // and machine-legible without stalling a merge the ruling already earned.
+    if outcome.lane_degraded.is_some() || outcome.bundle_degraded.is_some() {
         std::process::exit(3);
     }
     Ok(())
