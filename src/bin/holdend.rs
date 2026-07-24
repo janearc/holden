@@ -57,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
     let cfg = Config {
         delightd_url: core::pick(None, "JUDGE_DELIGHTD_URL", "http://127.0.0.1:8088"),
         sprints_root: core::pick_path(None, "JUDGE_SPRINTS_ROOT", "work/sprints")?,
+        bundle_root: core::pick_path(None, "JUDGE_BUNDLE_ROOT", ".holden/bundles")?,
         judge_cmd: core::pick(None, "JUDGE_CMD", "claude"),
         model: std::env::var("JUDGE_MODEL").ok(),
         home: std::env::var("HOME")
@@ -217,6 +218,10 @@ fn execute(app: Arc<App>, id: String, req: pb::RulingRequest) {
             if let Some((step, why)) = &outcome.lane_degraded {
                 // loud, never a bail: the ruling already earned its merge
                 warn!(ruling_id = id, step, why, "lane DEGRADED");
+            }
+            if let Some(why) = &outcome.bundle_degraded {
+                // same posture: the corpus lost evidence, the gate stands
+                warn!(ruling_id = id, why, "bundle DEGRADED");
             }
             if let Some(row) = app.rulings.lock().unwrap().get_mut(&id) {
                 row.ruling = Some(wire::to_wire(&outcome.doc));

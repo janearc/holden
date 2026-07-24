@@ -8,10 +8,14 @@
 
 use crate::core::Config;
 use anyhow::{anyhow, bail, Context, Result};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[derive(Debug)]
+// serde + PartialEq ride on the input structs for the bundle bento (RFC
+// section 5): a recorded bundle must load back equal, and the prompt is a
+// pure function of Inputs — input equality is the replay guarantee.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Inputs {
     pub repo_name: String,
     pub pr_number: u64,
@@ -35,14 +39,14 @@ pub struct Inputs {
     pub implicated: Vec<ImplicatedDoc>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct ConsumerHit {
     pub message: String,
     // "<repo>/<path>:<line>: <text>" — already citation-shaped for the ruling.
     pub citation: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImplicatedDoc {
     pub path: PathBuf,
     // None => the doc already rides above among the design docs; it is marked
