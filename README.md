@@ -50,8 +50,10 @@ holden --replay <bundle-dir>
 
 Every environment-derived fact resolves once at startup through a single
 config boundary: flag over environment variable over default. The config
-carries no credential of any kind — the spawned `claude` CLI owns auth
-(subscription), so a secret never enters the holden's config, environment
+carries no credential of any kind: on the shim path the spawned `claude`
+CLI owns auth (subscription); on the hahod path the JobSpec names an env
+var (`--token-env`) and the chute reads it — holden handles the NAME,
+never the value. A secret never enters holden's config, environment
 handling, or docs.
 
 | Flag | What it does |
@@ -64,8 +66,11 @@ handling, or docs.
 | `--overrule --reason <text>` | Operator overrule: write a ratify ruling that names itself an overrule, then post the status. An overrule is data, never a shrug. |
 | `--skip-status` | Write the ledger, post nothing. Rehearsal / hostile-network mode. |
 | `--skip-lane` | Skip the durability lane (no commit/push of the ruling). For a truly local rehearsal; rehearsal mode otherwise keeps the lane on. |
-| `--judge-cmd <bin>` | Judge executable. Flag over `JUDGE_CMD` over default `claude`; tests stub it. |
-| `--model <name>` | Model override. Flag over `JUDGE_MODEL`; absent means the CLI's configured model. |
+| `--judge-cmd <bin>` | Judge executable (shim path). Flag over `JUDGE_CMD` over default `claude`; tests stub it. |
+| `--model <name>` | Model override. Flag over `JUDGE_MODEL`; absent means the CLI's configured model. The hahod path refuses absence: a JobSpec names its judge. |
+| `--via <side>` | How a prompt reaches a judge: `shim` (claude CLI subprocess) or `hahod` (the haho client — one session, one job, the RFC's worked spec). Flag over `JUDGE_VIA` over default `shim` until the rehearsal proof flips it. Nothing downstream learns which side answered. |
+| `--hahod-url <url>` | hahod loopback base URL. Flag over `JUDGE_HAHOD_URL` over default `http://127.0.0.1:8790`. |
+| `--token-env <name>` | ENV VAR NAME the JobSpec names for the chute's credential; never a value. Flag over `JUDGE_TOKEN_ENV` over default `HOLDEN_ANTHROPIC_KEY`. |
 | `--delightd-url <url>` | delightd control-port base URL for the roster. Flag over `JUDGE_DELIGHTD_URL` over default `http://127.0.0.1:8088` (delightd's DefaultControlPort). |
 | `--sprints-root <dir>` | Sprints repo root (ledger home). Flag over `JUDGE_SPRINTS_ROOT` over default `$HOME/work/sprints`. |
 | `--bundle-root <dir>` | Bundle corpus root. Flag over `JUDGE_BUNDLE_ROOT` over default `$HOME/.holden/bundles`. |

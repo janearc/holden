@@ -7,6 +7,7 @@
 pub mod assemble;
 pub mod bundle;
 pub mod core;
+pub mod haho;
 pub mod lane;
 pub mod publish;
 pub mod ruling;

@@ -6,17 +6,46 @@
 // is fine), pedantic on the payload (ruling::parse or it does not exist).
 
 use crate::assemble::Inputs;
+use crate::haho;
 use crate::ruling::{self, RulingDoc};
 use anyhow::{bail, Context, Result};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+// the seam (holden RFC section 7 step 3): how a prompt reaches a judge.
+// hahod is the haho client; shim is the claude-CLI subprocess, surviving
+// behind the seam as the escape hatch. nothing outside this module learns
+// which side answered — build_prompt, the parse, and the one-retry law are
+// identical on both paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Via {
+    Shim,
+    Hahod,
+}
+
+impl Via {
+    pub fn parse(s: &str) -> Result<Via> {
+        match s {
+            "shim" => Ok(Via::Shim),
+            "hahod" => Ok(Via::Hahod),
+            other => bail!("judge via {other:?} is neither \"shim\" nor \"hahod\""),
+        }
+    }
+}
+
 pub struct SpawnCfg {
     // the judge executable; overridable so tests can stub a judge without
     // burning a model call ("claude" in production).
     pub judge_cmd: String,
-    // optional model override; None = the CLI's configured default.
+    // optional model override; None = the CLI's configured default. the
+    // hahod path REQUIRES a model: the spec names its judge explicitly
+    // (discernment is external in haho v1), and there is no "whatever the
+    // CLI is configured with" over the wire.
     pub model: Option<String>,
+    pub via: Via,
+    pub hahod_url: String,
+    // ENV VAR NAME of the credential the chute reads; never a value.
+    pub token_env: String,
 }
 
 // the single-purpose prompt. everything the judge may consider is IN the
@@ -226,12 +255,39 @@ fn spawn_once(cfg: &SpawnCfg, prompt: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-// spawn -> parse; on refusal, ONE retry with the refusal appended (ratified
+// one prompt to one judge, through whichever side of the seam the config
+// names. a hahod job is one session, one job, spent whole; a retry is a
+// NEW job with a fresh judge, exactly as a retry re-spawns the shim.
+fn judge_reply(cfg: &SpawnCfg, inputs: &Inputs, prompt: &str) -> Result<String> {
+    match cfg.via {
+        Via::Shim => spawn_once(cfg, prompt),
+        Via::Hahod => {
+            let model = cfg.model.clone().context(
+                "the hahod path requires an explicit model (--model / JUDGE_MODEL): \
+                 the JobSpec names its judge, there is no configured default over the wire",
+            )?;
+            let hcfg = haho::HahodCfg {
+                base_url: cfg.hahod_url.clone(),
+                model,
+                token_env: cfg.token_env.clone(),
+            };
+            let job_id = format!(
+                "ruling-{}-pr{}-{}",
+                inputs.repo_name,
+                inputs.pr_number,
+                instance_id()
+            );
+            haho::submit(&hcfg, &job_id, prompt)
+        }
+    }
+}
+
+// judge -> parse; on refusal, ONE retry with the refusal appended (ratified
 // T0 call); still refused -> absent, loud, nonzero. never a third try.
 pub fn rule(cfg: &SpawnCfg, inputs: &Inputs) -> Result<(RulingDoc, String)> {
     let prompt = build_prompt(inputs);
 
-    let first = spawn_once(cfg, &prompt)?;
+    let first = judge_reply(cfg, inputs, &prompt)?;
     let yaml = strip_fences(&first).to_string();
     match ruling::parse(&yaml) {
         Ok(doc) => Ok((doc, yaml)),
@@ -240,7 +296,7 @@ pub fn rule(cfg: &SpawnCfg, inputs: &Inputs) -> Result<(RulingDoc, String)> {
                 "{prompt}\n\n== YOUR PREVIOUS REPLY WAS REFUSED ==\n{first_err}\n\
                  Reply again with ONLY the corrected YAML document."
             );
-            let second = spawn_once(cfg, &retry_prompt)?;
+            let second = judge_reply(cfg, inputs, &retry_prompt)?;
             let yaml2 = strip_fences(&second).to_string();
             match ruling::parse(&yaml2) {
                 Ok(doc) => Ok((doc, yaml2)),
@@ -337,6 +393,30 @@ mod tests {
         assert_eq!(strip_fences("```yaml\nruling: x\n```"), "ruling: x");
         assert_eq!(strip_fences("```\nruling: x\n```"), "ruling: x");
         assert_eq!(strip_fences("  ruling: x  "), "ruling: x");
+    }
+
+    #[test]
+    fn via_parses_the_two_sides_only() {
+        assert_eq!(Via::parse("shim").unwrap(), Via::Shim);
+        assert_eq!(Via::parse("hahod").unwrap(), Via::Hahod);
+        let err = Via::parse("vibes-based").unwrap_err();
+        assert!(err.to_string().contains("neither"), "{err}");
+    }
+
+    #[test]
+    fn hahod_path_requires_an_explicit_model() {
+        // the seam refuses before any network is touched: a JobSpec names
+        // its judge, and "whatever the CLI is configured with" does not
+        // travel a wire.
+        let cfg = SpawnCfg {
+            judge_cmd: "false".into(),
+            model: None,
+            via: Via::Hahod,
+            hahod_url: "http://127.0.0.1:1".into(),
+            token_env: "HOLDEN_ANTHROPIC_KEY".into(),
+        };
+        let err = rule(&cfg, &fake_inputs()).unwrap_err();
+        assert!(err.to_string().contains("explicit model"), "{err}");
     }
 
     #[test]

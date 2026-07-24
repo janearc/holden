@@ -60,6 +60,18 @@ struct Args {
     /// judge executable (tests stub this); flag over env JUDGE_CMD over default claude
     #[arg(long)]
     judge_cmd: Option<String>,
+    /// how a prompt reaches a judge: "shim" (claude CLI subprocess) or
+    /// "hahod" (the haho client, RFC section 7 step 3); flag over env
+    /// JUDGE_VIA over default shim until the rehearsal proof flips it
+    #[arg(long)]
+    via: Option<String>,
+    /// hahod loopback base URL; flag over env JUDGE_HAHOD_URL over default
+    #[arg(long)]
+    hahod_url: Option<String>,
+    /// ENV VAR NAME the JobSpec names for the chute's credential (never a
+    /// value); flag over env JUDGE_TOKEN_ENV over default HOLDEN_ANTHROPIC_KEY
+    #[arg(long)]
+    token_env: Option<String>,
     /// model override passed to the judge; flag over env JUDGE_MODEL over the CLI's configured model
     #[arg(long)]
     model: Option<String>,
@@ -94,11 +106,23 @@ fn resolve(args: &Args) -> anyhow::Result<Config> {
             ".holden/bundles",
         )?,
         judge_cmd: core::pick(args.judge_cmd.clone(), "JUDGE_CMD", "claude"),
-        // model has no default: absent means the CLI's own configured model.
+        // model has no default: absent means the CLI's own configured model
+        // (the hahod path refuses absence loudly at spawn).
         model: args
             .model
             .clone()
             .or_else(|| std::env::var("JUDGE_MODEL").ok()),
+        judge_via: core::pick(args.via.clone(), "JUDGE_VIA", "shim"),
+        hahod_url: core::pick(
+            args.hahod_url.clone(),
+            "JUDGE_HAHOD_URL",
+            "http://127.0.0.1:8790",
+        ),
+        judge_token_env: core::pick(
+            args.token_env.clone(),
+            "JUDGE_TOKEN_ENV",
+            "HOLDEN_ANTHROPIC_KEY",
+        ),
         home: std::env::var("HOME").context("resolving the workstation home: HOME is unset")?,
     })
 }
@@ -139,6 +163,9 @@ fn main() -> anyhow::Result<()> {
         let spawn_cfg = spawn::SpawnCfg {
             judge_cmd: cfg.judge_cmd.clone(),
             model: cfg.model.clone(),
+            via: spawn::Via::parse(&cfg.judge_via)?,
+            hahod_url: cfg.hahod_url.clone(),
+            token_env: cfg.judge_token_env.clone(),
         };
         let (doc, yaml) = spawn::rule(&spawn_cfg, &inputs)?;
         let out = bundle::record_replay(dir, &yaml, &doc.ruling.judge_instance)?;
