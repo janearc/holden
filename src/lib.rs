@@ -5,6 +5,7 @@
 // arrives and how progress is told.
 
 pub mod assemble;
+pub mod bundle;
 pub mod core;
 pub mod lane;
 pub mod publish;
