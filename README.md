@@ -45,6 +45,7 @@ truth rather than a reviewed opinion, that thing is defective — not the judge.
 ```
 holden <repo-path> <pr-number> [flags]
 holden --validate-ruling <file>
+holden --replay <bundle-dir>
 ```
 
 Every environment-derived fact resolves once at startup through a single
@@ -56,6 +57,8 @@ handling, or docs.
 | Flag | What it does |
 |------|--------------|
 | `--validate-ruling <file>` | Validate a LEDGER ENTRY and exit (0 valid, 1 refused). No PR needed. |
+| `--replay <bundle-dir>` | Same bundle, fresh judge: re-run a recorded bundle as an experiment. No GitHub, no delightd. The verdict lands under the bundle's `replays/`, never in the ledger and never as a status — a replay cannot gate anything. |
+| `--record-only` | Assemble and record the bundle, judge nothing. The corpus seeder: a dry run that persists. |
 | `--dry-run` | Assemble and summarize the bundle; spawn nothing. Audit what a judge would see. |
 | `--include <path>` | Add a file's head content to the bundle. Repeatable. The supply side of a `needs-clarification` ruling: the judge names the evidence it needs, the re-fire provides it. |
 | `--overrule --reason <text>` | Operator overrule: write a ratify ruling that names itself an overrule, then post the status. An overrule is data, never a shrug. |
@@ -65,6 +68,7 @@ handling, or docs.
 | `--model <name>` | Model override. Flag over `JUDGE_MODEL`; absent means the CLI's configured model. |
 | `--delightd-url <url>` | delightd control-port base URL for the roster. Flag over `JUDGE_DELIGHTD_URL` over default `http://127.0.0.1:8088` (delightd's DefaultControlPort). |
 | `--sprints-root <dir>` | Sprints repo root (ledger home). Flag over `JUDGE_SPRINTS_ROOT` over default `$HOME/work/sprints`. |
+| `--bundle-root <dir>` | Bundle corpus root. Flag over `JUDGE_BUNDLE_ROOT` over default `$HOME/.holden/bundles`. |
 
 ## The bundle
 
@@ -81,6 +85,16 @@ assembled fresh per invocation, and is instructed to cite only from them:
 | The ruling ledger | every `rulings/*.yaml` across all sprint dirs | holden's only persistent memory. Fresh instances + a durable ledger replace a resident holden (struck in Sprint 0: long-lived sessions rot). |
 | Consumer scan | `rg` for changed proto message names across delightd's live roster (`GET /projects`; each entry's `path` names the checkout) | Consumer impact must be cited, not asserted. delightd unreachable = holden refuses to run: the fleet's orchestration is down, which is a production problem to fix before judging anything. A roster path missing on disk is equally loud — delightd and the workstation disagreeing is a finding, not a skip. Roster path contract: a `path` beginning `~/` (or a bare `~`) is workstation-home-relative — delightd serves `delight.yaml`'s rows verbatim, the rows use `~` so a layout relocation does not rot the roster, and holden expands against the HOME its config boundary resolved (holden and delightd share a workstation by construction). Anything else is literal. |
 | `--include` files | `git show HEAD_SHA:path` | Judge-requested evidence. A named file missing at head is a loud error — wrong evidence supplied silently would corrupt the ruling. |
+
+Every run records its bundle before any judgment, as a bento — inert,
+manifested, replayable (holden RFC section 5) — under the corpus root:
+`<bundle-root>/<repo>/pr<N>/<bundle-id>/`, holding `manifest.json`,
+`inputs.json`, and (once the ledger row lands) `ruling_ref.json`, which ties
+the ruling to the exact inputs it was rendered from. A bundle without a
+ruling-ref is a bare recording (`--record-only`, or a run whose ruling was
+refused). Recording failure degrades loud — stderr and exit 3 — and never
+blocks the gate; a disputed ruling re-runs with `--replay`, and each replay
+accumulates under the bundle's `replays/` without touching the record.
 
 ## The ruling
 
