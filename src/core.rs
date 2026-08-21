@@ -26,8 +26,6 @@ pub struct Config {
     // the seam (RFC section 7 step 3): "shim" or "hahod", parsed at spawn.
     pub judge_via: String,
     pub hahod_url: String,
-    // ENV VAR NAME the JobSpec names for the chute's credential; never a value.
-    pub judge_token_env: String,
     // the workstation home, resolved once here per the boundary above: the
     // roster's ~-prefixed paths are workstation-home-relative by contract.
     pub home: String,
@@ -130,7 +128,6 @@ pub fn run(
                 model: cfg.model.clone(),
                 via: spawn::Via::parse(&cfg.judge_via)?,
                 hahod_url: cfg.hahod_url.clone(),
-                token_env: cfg.judge_token_env.clone(),
             };
             spawn::rule(&spawn_cfg, &inputs)?.0
         }
