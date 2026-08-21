@@ -98,7 +98,11 @@ fn resolve(args: &Args) -> anyhow::Result<Config> {
         sprints_root: core::pick_path(
             args.sprints_root.clone(),
             "JUDGE_SPRINTS_ROOT",
-            "work/sprints",
+            // mesh/prod/sprints, not work/sprints: the estate moved from ~/work
+            // to ~/mesh and this default was left behind. It never surfaced
+            // because every invocation passes --sprints-root explicitly, so the
+            // fallback silently pointed at an empty directory.
+            "mesh/prod/sprints",
         )?,
         bundle_root: core::pick_path(
             args.bundle_root.clone(),
@@ -124,6 +128,10 @@ fn resolve(args: &Args) -> anyhow::Result<Config> {
             "HOLDEN_ANTHROPIC_KEY",
         ),
         home: std::env::var("HOME").context("resolving the workstation home: HOME is unset")?,
+        // Where THIS machine keeps its checkouts. Not read from the roster on
+        // purpose -- see assemble::resolve_entry_dir for why the roster's path
+        // is delightd's view and not ours.
+        estate_root: core::pick_path(None, "JUDGE_ESTATE_ROOT", "mesh/prod")?,
     })
 }
 

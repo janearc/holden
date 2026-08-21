@@ -61,10 +61,13 @@ struct DocPair {
     doc: String,
 }
 
-// one roster entry from delightd's GET /projects: the fleet's own answer to
-// "who is a consumer, and where does its checkout live". path is authoritative
-// — the judge scans that directory, never work_root + name (delightd already
-// resolved where the checkout lives; the old known-debt carried that split).
+// one roster entry from delightd's GET /projects: the fleet's answer to "who
+// is a consumer". NAME is authoritative; PATH is delightd's own view and may
+// be a container path this machine cannot see -- see resolve_entry_dir. An
+// earlier version of this comment claimed the opposite, that path was
+// authoritative and name never used to locate a checkout. That was true while
+// delightd ran on the workstation and became false the moment it moved into a
+// container, which is the outage resolve_entry_dir exists to prevent.
 #[derive(Debug)]
 pub struct RosterEntry {
     pub name: String,
@@ -159,6 +162,47 @@ fn expand_roster_path(path: &str, home: &str) -> PathBuf {
     }
 }
 
+// Resolve one roster entry to a checkout ON THIS MACHINE.
+//
+// The roster says WHICH projects the fleet knows. It does not say where they
+// live here, and it cannot: delightd runs in a container that binds the estate
+// at /work, so it reports /work/<name> -- correct there, meaningless on the
+// workstation. Reading that literal was a real outage. The moment delightd's
+// roster was corrected to container paths, every judge run refused with
+// "roster path is not on disk", for every repo, because holden was resolving
+// another machine's filesystem against its own.
+//
+// So NAME is the shared identity and PATH is one machine's opinion. Resolve by
+// name under this machine's estate root first, and fall back to the literal
+// only for entries that genuinely are workstation-absolute -- which keeps a
+// non-containerised delightd, and any older roster, working unchanged.
+fn resolve_entry_dir(entry: &RosterEntry, cfg: &Config) -> Option<PathBuf> {
+    let by_name = PathBuf::from(&cfg.estate_root).join(&entry.name);
+    if by_name.is_dir() {
+        return Some(by_name);
+    }
+    let literal = expand_roster_path(&entry.path, &cfg.home);
+    if literal.is_dir() {
+        return Some(literal);
+    }
+    None
+}
+
+// The refusal, kept in one place so both callers say the same thing and name
+// BOTH attempts. "not on disk" without saying where you looked sends the reader
+// hunting for a path that was never the one that mattered.
+fn unresolved(entry: &RosterEntry, cfg: &Config) -> anyhow::Error {
+    anyhow!(
+        "roster entry {} resolves to no checkout on this machine: tried {}/{} \
+         and the roster's own path {} -- delightd and the workstation disagree; \
+         a roster inconsistency is a finding, not a skip",
+        entry.name,
+        cfg.estate_root,
+        entry.name,
+        entry.path
+    )
+}
+
 // resolve one project name to its checkout via delightd's roster — the
 // service's front door uses this so a requestor names repos the fleet's
 // way (owner/name, or the bare project name), never a filesystem path.
@@ -172,37 +216,20 @@ pub fn resolve_repo_path(cfg: &Config, repo: &str) -> Result<PathBuf> {
     let entry = roster.iter().find(|e| e.name == name).ok_or_else(|| {
         anyhow!("repo {repo} is not on delightd's roster; the fleet does not know it")
     })?;
-    let dir = expand_roster_path(&entry.path, &cfg.home);
-    if !dir.is_dir() {
-        bail!(
-            "roster path for {} is not on disk: {} — delightd and the workstation \
-             disagree; a roster inconsistency is a finding, not a skip",
-            entry.name,
-            entry.path
-        );
-    }
-    Ok(dir)
+    resolve_entry_dir(entry, cfg).ok_or_else(|| unresolved(entry, cfg))
 }
 
 fn consumer_dirs(
     roster: &[RosterEntry],
     judged_name: &str,
-    home: &str,
+    cfg: &Config,
 ) -> Result<Vec<(String, PathBuf)>> {
     let mut out = Vec::new();
     for entry in roster {
         if entry.name == judged_name {
             continue;
         }
-        let dir = expand_roster_path(&entry.path, home);
-        if !dir.is_dir() {
-            bail!(
-                "roster path for {} is not on disk: {} — delightd and the workstation \
-                 disagree; a roster inconsistency is a finding, not a skip",
-                entry.name,
-                entry.path
-            );
-        }
+        let dir = resolve_entry_dir(entry, cfg).ok_or_else(|| unresolved(entry, cfg))?;
         out.push((entry.name.clone(), dir));
     }
     Ok(out)
@@ -413,7 +440,7 @@ pub fn assemble(
     let roster = fetch_roster(&cfg.delightd_url, |url| {
         run(Command::new("curl").args(["-fsS", url]))
     })?;
-    let consumer_repos = consumer_dirs(&roster, &repo_name, &cfg.home)?;
+    let consumer_repos = consumer_dirs(&roster, &repo_name, cfg)?;
 
     // consumer scan: for every message type named in touched proto hunks, rg
     // each roster checkout for uses. hits come back citation-shaped so the
@@ -786,7 +813,7 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
                 path: real,
             },
         ];
-        let got = consumer_dirs(&roster, "delightd", "/unused-home").unwrap();
+        let got = consumer_dirs(&roster, "delightd", &test_cfg("/unused-home", "/unused-estate")).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].0, "magpie");
     }
@@ -804,7 +831,7 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
             name: "paling".into(),
             path: format!("~/{}", base.to_string_lossy()),
         }];
-        let got = consumer_dirs(&roster, "delightd", &home.to_string_lossy()).unwrap();
+        let got = consumer_dirs(&roster, "delightd", &test_cfg(&home.to_string_lossy(), "/unused-estate")).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(
             got[0].1, real,
@@ -820,11 +847,53 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
             name: "ghost".into(),
             path: "/nonexistent/judge-test-ghost".into(),
         }];
-        let err = consumer_dirs(&roster, "delightd", "/unused-home").unwrap_err();
+        let err = consumer_dirs(&roster, "delightd", &test_cfg("/unused-home", "/unused-estate")).unwrap_err();
         assert!(
             err.to_string()
                 .contains("delightd and the workstation disagree"),
             "missing-path error lost its finding voice: {err}"
+        );
+    }
+
+    // A Config for tests that only exercise roster resolution: home and
+    // estate_root are the only fields that matter, the rest are inert.
+    fn test_cfg(home: &str, estate_root: &str) -> Config {
+        Config {
+            delightd_url: "http://127.0.0.1:0".into(),
+            sprints_root: "/unused".into(),
+            bundle_root: "/unused".into(),
+            judge_cmd: "true".into(),
+            model: None,
+            judge_via: "shim".into(),
+            hahod_url: "http://127.0.0.1:0".into(),
+            judge_token_env: "UNUSED".into(),
+            home: home.into(),
+            estate_root: estate_root.into(),
+        }
+    }
+
+    // THE REGRESSION, recorded because it took the whole gate down. delightd
+    // runs in a container and serves /work/<name>, a path that does not exist
+    // on the workstation. Reading it literally made every judge run refuse, for
+    // every repo, the moment delightd's roster was corrected. Resolution is by
+    // NAME under this machine's estate root; the container path is never
+    // consulted when the name resolves.
+    #[test]
+    fn a_container_path_still_resolves_by_name_under_the_estate_root() {
+        let real = std::env::temp_dir();
+        let estate = real.parent().expect("temp dir has a parent");
+        let name = real.file_name().expect("temp dir has a basename");
+        let roster = vec![RosterEntry {
+            name: name.to_string_lossy().into_owned(),
+            // exactly what delightd serves from inside its container
+            path: format!("/work/{}", name.to_string_lossy()),
+        }];
+        let cfg = test_cfg("/unused-home", &estate.to_string_lossy());
+        let got = consumer_dirs(&roster, "unrelated-judged-repo", &cfg).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(
+            got[0].1, real,
+            "a container path did not resolve by name under the estate root"
         );
     }
 }
