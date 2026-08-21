@@ -212,10 +212,34 @@ pub fn strip_fences(s: &str) -> &str {
     t
 }
 
-fn spawn_once(cfg: &SpawnCfg, prompt: &str) -> Result<String> {
+fn spawn_once(cfg: &SpawnCfg, inputs: &Inputs, prompt: &str) -> Result<String> {
     let mut cmd = Command::new(&cfg.judge_cmd);
     // headless: read prompt, reply, exit.
     cmd.arg("-p");
+
+    // WHO IS SPENDING. The judge is itself a Claude Code session, so its
+    // tokens land in the same telemetry as interactive work and are
+    // indistinguishable from it unless the session says who it is. These ride
+    // as OTLP resource attributes and become Prometheus labels (which ones is
+    // delightd's kube/prometheus/config.yaml to decide, not ours), so "what
+    // did that ruling cost" is answerable per repo, per pull request, and --
+    // via session.id, which the session supplies itself -- per run. Repeat
+    // rulings on one PR are ordinary, so per-run is the granularity that
+    // matters.
+    //
+    // APPENDED, never assigned. A parent may already be attributing something
+    // through this variable; overwriting it would silently drop whatever that
+    // was, and the symptom would be a gap in someone else's accounting rather
+    // than an error here.
+    let attribution = format!(
+        "mesh.component=holden-judge,mesh.repo={},mesh.pr={}",
+        inputs.repo_name, inputs.pr_number
+    );
+    let attribution = match std::env::var("OTEL_RESOURCE_ATTRIBUTES") {
+        Ok(inherited) if !inherited.is_empty() => format!("{inherited},{attribution}"),
+        _ => attribution,
+    };
+    cmd.env("OTEL_RESOURCE_ATTRIBUTES", attribution);
     // the judge is a pure prompt-to-text function and gets NO tools: every
     // input it may consider is already in the prompt, and the bundle is
     // untrusted text (design docs from public repos ride in it). without
@@ -260,7 +284,7 @@ fn spawn_once(cfg: &SpawnCfg, prompt: &str) -> Result<String> {
 // NEW job with a fresh judge, exactly as a retry re-spawns the shim.
 fn judge_reply(cfg: &SpawnCfg, inputs: &Inputs, prompt: &str) -> Result<String> {
     match cfg.via {
-        Via::Shim => spawn_once(cfg, prompt),
+        Via::Shim => spawn_once(cfg, inputs, prompt),
         Via::Hahod => {
             let model = cfg.model.clone().context(
                 "the hahod path requires an explicit model (--model / JUDGE_MODEL): \
