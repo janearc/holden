@@ -56,7 +56,11 @@ async fn main() -> anyhow::Result<()> {
     // no flags; it is a daemon, launchd carries its environment).
     let cfg = Config {
         delightd_url: core::pick(None, "JUDGE_DELIGHTD_URL", "http://127.0.0.1:8088"),
-        sprints_root: core::pick_path(None, "JUDGE_SPRINTS_ROOT", "work/sprints")?,
+        // mesh/prod/sprints, not work/sprints: the estate moved from ~/work to
+        // ~/mesh and this default was left behind. It never surfaced because
+        // every invocation passes --sprints-root explicitly -- so the fallback
+        // silently pointed at an empty directory.
+        sprints_root: core::pick_path(None, "JUDGE_SPRINTS_ROOT", "mesh/prod/sprints")?,
         bundle_root: core::pick_path(None, "JUDGE_BUNDLE_ROOT", ".holden/bundles")?,
         judge_cmd: core::pick(None, "JUDGE_CMD", "claude"),
         model: std::env::var("JUDGE_MODEL").ok(),
@@ -65,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
         judge_token_env: core::pick(None, "JUDGE_TOKEN_ENV", "HOLDEN_ANTHROPIC_KEY"),
         home: std::env::var("HOME")
             .map_err(|_| anyhow::anyhow!("resolving the workstation home: HOME is unset"))?,
+        estate_root: core::pick_path(None, "JUDGE_ESTATE_ROOT", "mesh/prod")?,
     };
     let addr = core::pick(None, "HOLDEND_ADDR", "127.0.0.1:8792");
     require_loopback(&addr)?;

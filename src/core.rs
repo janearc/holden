@@ -31,6 +31,11 @@ pub struct Config {
     // the workstation home, resolved once here per the boundary above: the
     // roster's ~-prefixed paths are workstation-home-relative by contract.
     pub home: String,
+    // Where THIS machine keeps its checkouts. The roster says WHICH projects
+    // exist; where they sit on disk is the reading machine's business, because
+    // delightd runs in a container and reports paths in its own filesystem.
+    // See assemble::resolve_entry_dir.
+    pub estate_root: String,
 }
 
 // one fact's resolution: the flag wins, else the env var, else the default.
