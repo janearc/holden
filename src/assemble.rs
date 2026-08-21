@@ -866,7 +866,6 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
             model: None,
             judge_via: "shim".into(),
             hahod_url: "http://127.0.0.1:0".into(),
-            judge_token_env: "UNUSED".into(),
             home: home.into(),
             estate_root: estate_root.into(),
         }

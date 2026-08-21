@@ -14,12 +14,6 @@ use anyhow::{bail, Context, Result};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-// the messages API's canonical address, as the RFC's worked spec pins it.
-// not environment-derived: this is the contract-documented value for the
-// ANTHROPIC_COMPATIBLE kind; the chute reads the credential from the env
-// var the spec NAMES (token_env) — holden never touches the value.
-const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
-
 // completion poll cadence. a ruling runs minutes; 3s keeps the wait honest
 // without hammering the loopback. no client deadline in v0, the shim's own
 // posture: hahod's drain and orphan recovery land a dead flight as FAILED,
@@ -31,8 +25,11 @@ pub struct HahodCfg {
     // the judge, named exactly as --model does today; REQUIRED on this path
     // (the API takes no "whatever the CLI is configured with").
     pub model: String,
-    // ENV VAR NAME of the credential, never the value (haho section 14).
-    pub token_env: String,
+    // WHO IS SPENDING, carried into the chute's child as
+    // OTEL_RESOURCE_ATTRIBUTES. A requestor cannot reach hahod's child
+    // process, so this is the only way the per-repo and per-PR attribution
+    // the shim already delivers survives the move onto hahod.
+    pub otel_attributes: String,
 }
 
 // the worked spec, as data. pure, so the test can hold it against the RFC
@@ -42,9 +39,12 @@ pub fn ruling_spec(job_id: &str, prompt: &str, cfg: &HahodCfg) -> serde_json::Va
         "jobId": job_id,
         "payload": {"messages": {"messages": [
             {"role": "user", "content": prompt}]}},
-        "backend": {"kind": "ANTHROPIC_COMPATIBLE", "model": cfg.model,
-                    "baseUrl": ANTHROPIC_BASE_URL,
-                    "tokenEnv": cfg.token_env},
+        // CLAUDE_CLI, not ANTHROPIC_COMPATIBLE: the judge is the agent CLI
+        // and carries its OWN authentication. base_url and token_env are
+        // absent because this kind refuses both -- naming a credential
+        // nothing reads is how a thing looks configured and is inert.
+        "backend": {"kind": "CLAUDE_CLI", "model": cfg.model,
+                    "params": {"otel_resource_attributes": cfg.otel_attributes}},
         "framing": {"strategy": "WHOLE_OR_ERROR"},
         "synthesis": {"mode": "NONE"},
         "cache": {"kind": "NONE"},
@@ -270,7 +270,8 @@ mod tests {
         HahodCfg {
             base_url: "http://127.0.0.1:8790".into(),
             model: "claude-fable-5".into(),
-            token_env: "HOLDEN_ANTHROPIC_KEY".into(),
+            otel_attributes: "mesh.component=holden-judge,mesh.repo=delightd,mesh.pr=121"
+                .into(),
         }
     }
 
@@ -290,10 +291,15 @@ mod tests {
             spec["payload"]["messages"]["messages"][0]["content"],
             "<the assembled ruling prompt>"
         );
-        assert_eq!(spec["backend"]["kind"], "ANTHROPIC_COMPATIBLE");
+        assert_eq!(spec["backend"]["kind"], "CLAUDE_CLI");
         assert_eq!(spec["backend"]["model"], "claude-fable-5");
-        assert_eq!(spec["backend"]["baseUrl"], "https://api.anthropic.com");
-        assert_eq!(spec["backend"]["tokenEnv"], "HOLDEN_ANTHROPIC_KEY");
+        // both absent, not empty: the kind refuses either if present.
+        assert!(spec["backend"]["baseUrl"].is_null());
+        assert!(spec["backend"]["tokenEnv"].is_null());
+        assert_eq!(
+            spec["backend"]["params"]["otel_resource_attributes"],
+            "mesh.component=holden-judge,mesh.repo=delightd,mesh.pr=121"
+        );
         assert_eq!(spec["framing"]["strategy"], "WHOLE_OR_ERROR");
         assert_eq!(spec["synthesis"]["mode"], "NONE");
         assert_eq!(spec["cache"]["kind"], "NONE");

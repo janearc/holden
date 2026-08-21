@@ -68,10 +68,6 @@ struct Args {
     /// hahod loopback base URL; flag over env JUDGE_HAHOD_URL over default
     #[arg(long)]
     hahod_url: Option<String>,
-    /// ENV VAR NAME the JobSpec names for the chute's credential (never a
-    /// value); flag over env JUDGE_TOKEN_ENV over default HOLDEN_ANTHROPIC_KEY
-    #[arg(long)]
-    token_env: Option<String>,
     /// model override passed to the judge; flag over env JUDGE_MODEL over the CLI's configured model
     #[arg(long)]
     model: Option<String>,
@@ -122,11 +118,6 @@ fn resolve(args: &Args) -> anyhow::Result<Config> {
             "JUDGE_HAHOD_URL",
             "http://127.0.0.1:8790",
         ),
-        judge_token_env: core::pick(
-            args.token_env.clone(),
-            "JUDGE_TOKEN_ENV",
-            "HOLDEN_ANTHROPIC_KEY",
-        ),
         home: std::env::var("HOME").context("resolving the workstation home: HOME is unset")?,
         // Where THIS machine keeps its checkouts. Not read from the roster on
         // purpose -- see assemble::resolve_entry_dir for why the roster's path
@@ -173,7 +164,6 @@ fn main() -> anyhow::Result<()> {
             model: cfg.model.clone(),
             via: spawn::Via::parse(&cfg.judge_via)?,
             hahod_url: cfg.hahod_url.clone(),
-            token_env: cfg.judge_token_env.clone(),
         };
         let (doc, yaml) = spawn::rule(&spawn_cfg, &inputs)?;
         let out = bundle::record_replay(dir, &yaml, &doc.ruling.judge_instance)?;

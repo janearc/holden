@@ -66,7 +66,6 @@ async fn main() -> anyhow::Result<()> {
         model: std::env::var("JUDGE_MODEL").ok(),
         judge_via: core::pick(None, "JUDGE_VIA", "shim"),
         hahod_url: core::pick(None, "JUDGE_HAHOD_URL", "http://127.0.0.1:8790"),
-        judge_token_env: core::pick(None, "JUDGE_TOKEN_ENV", "HOLDEN_ANTHROPIC_KEY"),
         home: std::env::var("HOME")
             .map_err(|_| anyhow::anyhow!("resolving the workstation home: HOME is unset"))?,
         estate_root: core::pick_path(None, "JUDGE_ESTATE_ROOT", "mesh/prod")?,

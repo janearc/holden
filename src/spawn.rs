@@ -44,8 +44,24 @@ pub struct SpawnCfg {
     pub model: Option<String>,
     pub via: Via,
     pub hahod_url: String,
-    // ENV VAR NAME of the credential the chute reads; never a value.
-    pub token_env: String,
+}
+
+// WHO IS SPENDING, as one string both sides of the seam can carry. The judge
+// is itself a Claude Code session, so its tokens land in the same telemetry as
+// interactive work and are indistinguishable from it unless the session says
+// who it is. These ride as OTLP resource attributes and become Prometheus
+// labels, so "what did that ruling cost" is answerable per repo, per pull
+// request, and -- via session.id, which the session supplies itself -- per run.
+//
+// Pure, and deliberately NOT merged with this process's environment here: the
+// shim merges before setting the child's env, and the hahod path must send its
+// own attribution alone, because hahod merges with ITS environment on the far
+// side. Merging in both places would double whatever the two happen to share.
+fn attribution(inputs: &Inputs) -> String {
+    format!(
+        "mesh.component=holden-judge,mesh.repo={},mesh.pr={}",
+        inputs.repo_name, inputs.pr_number
+    )
 }
 
 // the single-purpose prompt. everything the judge may consider is IN the
@@ -231,10 +247,7 @@ fn spawn_once(cfg: &SpawnCfg, inputs: &Inputs, prompt: &str) -> Result<String> {
     // through this variable; overwriting it would silently drop whatever that
     // was, and the symptom would be a gap in someone else's accounting rather
     // than an error here.
-    let attribution = format!(
-        "mesh.component=holden-judge,mesh.repo={},mesh.pr={}",
-        inputs.repo_name, inputs.pr_number
-    );
+    let attribution = attribution(inputs);
     let attribution = match std::env::var("OTEL_RESOURCE_ATTRIBUTES") {
         Ok(inherited) if !inherited.is_empty() => format!("{inherited},{attribution}"),
         _ => attribution,
@@ -293,7 +306,7 @@ fn judge_reply(cfg: &SpawnCfg, inputs: &Inputs, prompt: &str) -> Result<String> 
             let hcfg = haho::HahodCfg {
                 base_url: cfg.hahod_url.clone(),
                 model,
-                token_env: cfg.token_env.clone(),
+                otel_attributes: attribution(inputs),
             };
             let job_id = format!(
                 "ruling-{}-pr{}-{}",
@@ -437,7 +450,6 @@ mod tests {
             model: None,
             via: Via::Hahod,
             hahod_url: "http://127.0.0.1:1".into(),
-            token_env: "HOLDEN_ANTHROPIC_KEY".into(),
         };
         let err = rule(&cfg, &fake_inputs()).unwrap_err();
         assert!(err.to_string().contains("explicit model"), "{err}");
