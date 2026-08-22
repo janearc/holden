@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
         sprints_root: core::pick_path(None, "JUDGE_SPRINTS_ROOT", "mesh/prod/sprints")?,
         bundle_root: core::pick_path(None, "JUDGE_BUNDLE_ROOT", ".holden/bundles")?,
         judge_cmd: core::pick(None, "JUDGE_CMD", "claude"),
-        model: std::env::var("JUDGE_MODEL").ok(),
+        model: Some(core::pick(None, "JUDGE_MODEL", "claude-opus-4-8")),
         effort: core::pick(None, "JUDGE_EFFORT", "high"),
         judge_via: core::pick(None, "JUDGE_VIA", "shim"),
         hahod_url: core::pick(None, "JUDGE_HAHOD_URL", "http://127.0.0.1:8790"),
