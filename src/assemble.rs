@@ -266,9 +266,52 @@ pub fn assemble(
         bail!("could not resolve head sha for PR {pr_number}");
     }
 
-    let diff = run(Command::new("gh")
+    let diff = match run(Command::new("gh")
         .args(["pr", "diff", &pr_number.to_string()])
-        .current_dir(repo_path))?;
+        .current_dir(repo_path))
+    {
+        Ok(d) => d,
+        // GitHub refuses a diff above 300 files (HTTP 406, "too_large"), and a
+        // repository that commits generated data reaches that in one honest
+        // change -- peacock's per-cell street tiles are 2,417 files beside the
+        // builder that wrote them. Before this, such a PR could be neither
+        // judged NOR overruled, because the overrule path assembles the same
+        // bundle. The refusal is GitHub's transport limit, not a statement
+        // about the change, so fall back to the diff we can compute ourselves.
+        // Same two commits, so the ruling ties to the same evidence: the head
+        // sha is already the bundle's diff_ref, and the base comes from the PR.
+        Err(e) if format!("{e:#}").contains("too_large") => {
+            let base_sha = run(Command::new("gh")
+                .args([
+                    "pr",
+                    "view",
+                    &pr_number.to_string(),
+                    "--json",
+                    "baseRefOid",
+                    "-q",
+                    ".baseRefOid",
+                ])
+                .current_dir(repo_path))?
+            .trim()
+            .to_string();
+            if base_sha.is_empty() {
+                bail!("PR {pr_number}: gh refused the diff as too large and no base sha to diff against");
+            }
+            eprintln!(
+                "diff: gh refused PR {pr_number} as too_large; diffing {}...{} locally",
+                &base_sha[..base_sha.len().min(7)],
+                &head_sha[..head_sha.len().min(7)]
+            );
+            run(Command::new("git")
+                .args(["diff", &format!("{base_sha}...{head_sha}")])
+                .current_dir(repo_path))
+            .with_context(|| {
+                format!("PR {pr_number}: gh refused the diff and the local diff failed too \
+                         (is {base_sha} present in this checkout?)")
+            })?
+        }
+        Err(e) => return Err(e),
+    };
     if diff.trim().is_empty() {
         bail!("PR {pr_number} has an empty diff; nothing to rule on");
     }
