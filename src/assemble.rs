@@ -6,6 +6,7 @@
 // pure and unit-tested. network/API failures are loud errors — the harness
 // fails closed, it never rules on partial inputs.
 
+use std::fs;
 use crate::core::Config;
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -315,6 +316,7 @@ pub fn assemble(
     if diff.trim().is_empty() {
         bail!("PR {pr_number} has an empty diff; nothing to rule on");
     }
+    let diff = partition_diff(&diff, &declared_generated(repo_path));
 
     // the tree at the PR head, paths only: existence-evidence for doc claims
     // ("register.py exists at head" is citable; "trust me" is not). the head
@@ -939,4 +941,178 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
             "a container path did not resolve by name under the estate root"
         );
     }
+}
+
+// A judge rules on CODE. Generated artifacts are not reviewable by reading
+// them: 2,511 minified street-cell blobs tell a judge nothing it could act on,
+// and peacock PR 31's local diff -- 46,648,510 bytes across 2,518 files -- was
+// large enough that the CLI refused the prompt outright, killing the run.
+//
+// The operator's ruling (2026-08-22): "holden should not be asked to review
+// binary. so we should be careful to construct diffs for holden from code
+// alone." So the diff is PARTITIONED, not truncated. Every line of every code
+// file survives intact. Generated files are reduced to a manifest line each,
+// and the manifest is stated at the top of the diff so the judge knows exactly
+// what exists in this change that it is not reading.
+//
+// This is strictly better than a size budget, which was the first attempt: a
+// budget elides by position, so it can hide a source file behind a thousand
+// blobs. Classification elides by KIND, so the thing a judge needs is never
+// the thing that gets cut.
+//
+// A repository declares its own generated paths in .holdenignore, one glob-ish
+// prefix or *.suffix per line, comments with '#'. Absent that, the content
+// heuristics below apply: git's own binary marker, and lines too long to be
+// hand-written.
+
+// a single added/removed line longer than this is not hand-written source.
+const MINIFIED_LINE: usize = 2_000;
+// backstop only: a code diff this large is itself a finding, but the judge
+// should still get a ruling rather than a dead run.
+const CODE_BACKSTOP: usize = 600_000;
+
+// a repository declares its own generated paths. holden should not carry a
+// hardcoded list of any repo's layout: the repo states its own truth, the same
+// way .docpairs already does. One prefix or *.suffix per line; # comments.
+fn declared_generated(repo_path: &Path) -> Vec<String> {
+    let Ok(text) = fs::read_to_string(repo_path.join(".holdenignore")) else {
+        return Vec::new();
+    };
+    text.lines()
+        .map(|l| l.split('#').next().unwrap_or("").trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
+// pure: split a unified diff into (path, section) pairs. The leading chunk
+// before any "diff --git" (rare, but possible) is returned under an empty path
+// and always kept.
+fn diff_sections(diff: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut cur = String::new();
+    for line in diff.lines() {
+        if line.starts_with("diff --git ") && !cur.is_empty() {
+            out.push((section_path(&cur), std::mem::take(&mut cur)));
+        }
+        cur.push_str(line);
+        cur.push('\n');
+    }
+    if !cur.is_empty() {
+        out.push((section_path(&cur), cur));
+    }
+    out
+}
+
+// pure: is this section a generated artifact rather than source? Declared
+// paths win; otherwise git's binary marker, then the long-line heuristic.
+fn is_generated(path: &str, sec: &str, declared: &[String]) -> bool {
+    // a leading ! re-admits a path a broader line excluded, as in .gitignore.
+    // The manifests inside a generated tree ARE reviewable -- they are the
+    // contract the builder writes against -- so a repo must be able to hide
+    // the blobs and keep the index.
+    for d in declared {
+        if let Some(keep) = d.strip_prefix('!') {
+            // a bare filename re-admits that file ANYWHERE -- manifests are
+            // reviewable wherever a builder writes them, and enumerating one
+            // line per metro is a list that goes stale the next time one is
+            // added.
+            let by_name = !keep.contains('/') && path.rsplit('/').next() == Some(keep);
+            if by_name || path == keep || path.starts_with(keep) {
+                return false;
+            }
+        }
+    }
+    for d in declared {
+        if d.starts_with('!') {
+            continue;
+        }
+        if let Some(suffix) = d.strip_prefix("*.") {
+            if path.ends_with(suffix) {
+                return true;
+            }
+        } else if path == d.as_str() || path.starts_with(d.as_str()) {
+            return true;
+        }
+    }
+    if sec.contains("\nBinary files ") || sec.starts_with("Binary files ") {
+        return true;
+    }
+    sec.lines()
+        .any(|l| (l.starts_with('+') || l.starts_with('-')) && l.len() > MINIFIED_LINE)
+}
+
+fn partition_diff(diff: &str, declared: &[String]) -> String {
+    let sections = diff_sections(diff);
+    let mut code = String::new();
+    let mut generated: Vec<(String, usize, usize)> = Vec::new();
+
+    for (path, sec) in sections {
+        if path.is_empty() {
+            code.push_str(&sec);
+            continue;
+        }
+        if is_generated(&path, &sec, declared) {
+            let adds = sec.lines().filter(|l| l.starts_with('+')).count();
+            let dels = sec.lines().filter(|l| l.starts_with('-')).count();
+            generated.push((path, adds.saturating_sub(1), dels.saturating_sub(1)));
+        } else {
+            code.push_str(&sec);
+        }
+    }
+
+    if generated.is_empty() && code.len() <= CODE_BACKSTOP {
+        return code;
+    }
+
+    let mut out = String::new();
+    if !generated.is_empty() {
+        let n = generated.len();
+        out.push_str(&format!(
+            "@@ HOLDEN: {n} GENERATED FILE(S) NOT SHOWN @@\n\
+             [holden partitioned this diff. The files below are generated artifacts\n\
+              -- declared in .holdenignore, or detected as binary or minified. Their\n\
+              CONTENTS are not in this diff and you have not read them. Rule on the\n\
+              code, the builder and the manifest that produce them. If a ruling turns\n\
+              on a generated file's contents, refuse and say which one you need.]\n"
+        ));
+        for (p, a, d) in &generated {
+            out.push_str(&format!("  {p}  (+{a} -{d})\n"));
+        }
+        out.push_str("@@ END GENERATED MANIFEST @@\n\n");
+    }
+
+    if code.len() > CODE_BACKSTOP {
+        let cut = &code[..CODE_BACKSTOP];
+        let end = cut.rfind('\n').unwrap_or(cut.len());
+        out.push_str(&code[..end]);
+        out.push_str(&format!(
+            "\n@@ HOLDEN TRUNCATED @@\n\
+             [holden: the CODE portion of this diff is {} bytes, past the {CODE_BACKSTOP}\n\
+              backstop, and was cut here. This is not normal and is itself worth saying\n\
+              in the ruling. You have NOT seen the remainder.]\n",
+            code.len()
+        ));
+    } else {
+        out.push_str(&code);
+    }
+
+    eprintln!(
+        "diff: partitioned {} bytes -> {} ({} generated file(s) reduced to a manifest)",
+        diff.len(),
+        out.len(),
+        generated.len()
+    );
+    out
+}
+
+// pure: the repo-relative path a unified-diff section describes, for the
+// elision notes. Falls back to the raw "diff --git" line when unparseable,
+// because a note naming nothing is worse than a noisy one.
+fn section_path(sec: &str) -> String {
+    for line in sec.lines() {
+        if let Some(p) = line.strip_prefix("+++ b/") {
+            return p.to_string();
+        }
+    }
+    sec.lines().next().unwrap_or("(unknown path)").to_string()
 }
