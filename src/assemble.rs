@@ -864,6 +864,7 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
             bundle_root: "/unused".into(),
             judge_cmd: "true".into(),
             model: None,
+            effort: "high".into(),
             judge_via: "shim".into(),
             hahod_url: "http://127.0.0.1:0".into(),
             home: home.into(),
