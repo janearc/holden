@@ -68,7 +68,9 @@ struct Args {
     /// hahod loopback base URL; flag over env JUDGE_HAHOD_URL over default
     #[arg(long)]
     hahod_url: Option<String>,
-    /// model override passed to the judge; flag over env JUDGE_MODEL over the CLI's configured model
+    /// model the judge runs on; flag over env JUDGE_MODEL over default
+    /// claude-opus-4-8. Never the launching session's, for the same reason
+    /// --effort is not.
     #[arg(long)]
     model: Option<String>,
     /// reasoning effort passed to the judge (low|medium|high|xhigh|max);
