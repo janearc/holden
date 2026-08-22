@@ -315,6 +315,7 @@ pub fn assemble(
     if diff.trim().is_empty() {
         bail!("PR {pr_number} has an empty diff; nothing to rule on");
     }
+    let diff = budget_diff(&diff);
 
     // the tree at the PR head, paths only: existence-evidence for doc claims
     // ("register.py exists at head" is citable; "trust me" is not). the head
@@ -939,4 +940,120 @@ diff --git a/pkg/httpapi/register.go b/pkg/httpapi/register.go
             "a container path did not resolve by name under the estate root"
         );
     }
+}
+
+// A judge cannot rule on a diff it was never shown, and it must never be told
+// it saw one it did not. GitHub refuses above 300 files and the local fallback
+// then hands back everything -- peacock PR 31 produced 2,441,537 bytes across
+// 2,518 files, the claude CLI refused the prompt, closed stdin, and the run
+// died on EPIPE with no ruling. Truncating silently would be worse than
+// failing: it would produce a confident ruling over evidence the judge never
+// read, which is this sprint's whole subject.
+//
+// So the diff is budgeted per file and in total, and every elision SAYS SO in
+// the diff text the judge reads. The `diff --git` and `+++ b/<path>` header
+// lines are preserved for EVERY file including elided ones, because
+// changed_paths() reads them and the docpair, contract and consumer machinery
+// downstream depends on the full path list being intact.
+const PER_FILE_BUDGET: usize = 20_000;
+const TOTAL_DIFF_BUDGET: usize = 400_000;
+
+fn budget_diff(diff: &str) -> String {
+    if diff.len() <= TOTAL_DIFF_BUDGET {
+        return diff.to_string();
+    }
+    // split on file boundaries; the first chunk before any "diff --git" (rare)
+    // is kept as-is.
+    let mut sections: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for line in diff.lines() {
+        if line.starts_with("diff --git ") && !cur.is_empty() {
+            sections.push(std::mem::take(&mut cur));
+        }
+        cur.push_str(line);
+        cur.push('\n');
+    }
+    if !cur.is_empty() {
+        sections.push(cur);
+    }
+
+    let mut out = String::new();
+    let mut spent = 0usize;
+    let mut elided_files = 0usize;
+    let mut elided_bytes = 0usize;
+    let mut dropped: Vec<String> = Vec::new();
+
+    for sec in sections {
+        let path = section_path(&sec);
+        if spent >= TOTAL_DIFF_BUDGET {
+            dropped.push(path);
+            elided_bytes += sec.len();
+            continue;
+        }
+        if sec.len() <= PER_FILE_BUDGET {
+            spent += sec.len();
+            out.push_str(&sec);
+            continue;
+        }
+        // keep this file's headers so its path stays visible and parseable,
+        // then say plainly what was removed.
+        let mut head = String::new();
+        for line in sec.lines() {
+            head.push_str(line);
+            head.push('\n');
+            if line.starts_with("+++ ") {
+                break;
+            }
+        }
+        let cut = sec.len() - head.len();
+        elided_files += 1;
+        elided_bytes += cut;
+        spent += head.len();
+        out.push_str(&head);
+        out.push_str(&format!(
+            "@@ HOLDEN ELIDED @@\n\
+             [holden: {cut} bytes of hunks for this path were REMOVED to fit the \n\
+              judge's prompt budget. You are NOT looking at this file's contents. \n\
+              Rule on what you can see; if this path's content is material, say so \n\
+              in needs_clarification and ask for it with --include.]\n"
+        ));
+    }
+
+    if !dropped.is_empty() {
+        out.push_str(&format!(
+            "\n@@ HOLDEN ELIDED @@\n\
+             [holden: {} further changed path(s) were omitted ENTIRELY after the \n\
+              total diff budget of {TOTAL_DIFF_BUDGET} bytes was spent. Their paths:\n",
+            dropped.len()
+        ));
+        for p in &dropped {
+            out.push_str(&format!("  {p}\n"));
+        }
+        out.push_str(
+            " You have seen NEITHER their contents nor their hunks. If the ruling \n\
+              turns on them, refuse and say which you need.]\n",
+        );
+    }
+
+    eprintln!(
+        "diff: budgeted {} bytes down to {} ({} file(s) elided, {} path(s) dropped, {} bytes removed)",
+        diff.len(),
+        out.len(),
+        elided_files,
+        dropped.len(),
+        elided_bytes
+    );
+    out
+}
+
+// pure: the repo-relative path a unified-diff section describes, for the
+// elision notes. Falls back to the raw "diff --git" line when unparseable,
+// because a note naming nothing is worse than a noisy one.
+fn section_path(sec: &str) -> String {
+    for line in sec.lines() {
+        if let Some(p) = line.strip_prefix("+++ b/") {
+            return p.to_string();
+        }
+    }
+    sec.lines().next().unwrap_or("(unknown path)").to_string()
 }

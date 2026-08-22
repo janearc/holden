@@ -291,11 +291,27 @@ fn spawn_once(cfg: &SpawnCfg, inputs: &Inputs, prompt: &str) -> Result<String> {
     let mut child = cmd
         .spawn()
         .with_context(|| format!("spawning judge {:?}", cfg.judge_cmd))?;
-    child
+    // a judge that refuses the prompt closes stdin, and write_all then fails
+    // with EPIPE. Returning that bare error throws away the child's OWN
+    // explanation -- the reported fault becomes "broken pipe" while the real
+    // one (a prompt the CLI would not accept) is discarded unread. Measured
+    // 2026-08-22 on peacock PR 31, a 2.4 MB diff. So on a write failure, reap
+    // the child and report what IT said; the pipe error is the symptom.
+    let write_res = child
         .stdin
         .as_mut()
         .context("judge stdin unavailable")?
-        .write_all(prompt.as_bytes())?;
+        .write_all(prompt.as_bytes());
+    if let Err(e) = write_res {
+        let out = child.wait_with_output()?;
+        let err = String::from_utf8_lossy(&out.stderr);
+        let err = err.trim();
+        bail!(
+            "judge closed its input after {} bytes of prompt ({e}); it said: {}",
+            prompt.len(),
+            if err.is_empty() { "(nothing on stderr)" } else { err }
+        );
+    }
     // no timeout in v0: first runs are operator-watched; a wedged judge is
     // ctrl-c'd by a human, not silently killed into a half-ruling.
     let out = child.wait_with_output()?;
