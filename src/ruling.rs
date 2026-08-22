@@ -190,10 +190,70 @@ fn is_file_line_citation(s: &str) -> bool {
 
 // parse-and-validate. anything short of Ok(..) is, by ADR rule, ABSENT.
 fn parse_with(yaml: &str, ctx: Context) -> Result<RulingDoc, String> {
-    let doc: RulingDoc =
-        serde_yaml::from_str(yaml).map_err(|e| format!("ruling does not parse: {e}"))?;
+    let doc = deserialize_ruling_doc(yaml).map_err(|e| format!("ruling does not parse: {e}"))?;
     validate(&doc, ctx).map_err(|errs| format!("ruling is invalid: {}", errs.join("; ")))?;
     Ok(doc)
+}
+
+// Deserialize a reply into a RulingDoc, tolerating two things a model reliably
+// does to an otherwise-sound ruling -- the sprints#52 class, captured live
+// 2026-08-22 from an opus-4.8 judge whose reply was verdict: ratify and carried
+// a real diff_ref, yet was refused "missing field `diff_ref`":
+//   1. the whole reply wrapped in a ```yaml ... ``` markdown code fence;
+//   2. a FLATTENED shape -- `ruling:` emitted as an empty key with diff_ref,
+//      verdict and the rest sitting at the top level BESIDE it, not nested
+//      under it, so the typed parse read `ruling` as empty.
+// We strip the fence and re-nest the flattened body, then deserialize through
+// the same typed path. deny_unknown_fields and the enums still do all the real
+// refusing: this widens what SHAPE we accept, never what CONTENT.
+fn deserialize_ruling_doc(yaml: &str) -> Result<RulingDoc, serde_yaml::Error> {
+    let cleaned = strip_code_fence(yaml);
+    let value: serde_yaml::Value = serde_yaml::from_str(&cleaned)?;
+    serde_yaml::from_value(renest_flattened_ruling(value))
+}
+
+// Strip a single leading ``` or ```yaml fence (and its closing ```), if the
+// reply is wrapped in one. Un-fenced input is returned untouched.
+fn strip_code_fence(s: &str) -> String {
+    let trimmed = s.trim();
+    let Some(rest) = trimmed.strip_prefix("```") else {
+        return s.to_string();
+    };
+    // drop the remainder of the opening fence line (an optional language tag)
+    let body = rest
+        .split_once('\n')
+        .map(|(_tag, after)| after)
+        .unwrap_or("");
+    // drop a trailing closing fence
+    body.trim_end()
+        .strip_suffix("```")
+        .unwrap_or(body)
+        .trim_end()
+        .to_string()
+}
+
+// If the document's `ruling` key is absent or empty and the ruling FIELDS sit
+// at the top level, move them under `ruling`. A well-formed nested document
+// (`ruling:` with a non-empty mapping) is returned unchanged, so the canonical
+// path is untouched and deny_unknown_fields still catches a stray top-level key.
+fn renest_flattened_ruling(value: serde_yaml::Value) -> serde_yaml::Value {
+    use serde_yaml::Value;
+    let Value::Mapping(mut map) = value else {
+        return value;
+    };
+    let ruling_key = Value::String("ruling".to_string());
+    let nested_is_populated = matches!(
+        map.get(&ruling_key),
+        Some(Value::Mapping(inner)) if !inner.is_empty()
+    );
+    if nested_is_populated {
+        return Value::Mapping(map);
+    }
+    // flattened (or ruling: null/empty): drop the empty marker and nest the rest.
+    map.remove(&ruling_key);
+    let mut outer = serde_yaml::Mapping::new();
+    outer.insert(ruling_key, Value::Mapping(map));
+    Value::Mapping(outer)
 }
 
 // what a freshly spawned judge hands back.
@@ -222,8 +282,37 @@ mod tests {
             .filter(|l| !l.trim_start().starts_with("diff_ref:"))
             .collect::<Vec<_>>()
             .join("\n");
-        let doc = parse(&without).expect("a reply missing diff_ref must parse; the harness stamps it");
-        assert!(doc.ruling.diff_ref.is_empty(), "unstamped, it is empty rather than invented");
+        let doc =
+            parse(&without).expect("a reply missing diff_ref must parse; the harness stamps it");
+        assert!(
+            doc.ruling.diff_ref.is_empty(),
+            "unstamped, it is empty rather than invented"
+        );
+    }
+
+    // THE sprints#52 CAPTURE, verbatim. This is the exact reply an opus-4.8
+    // judge produced for haho PR 15 on 2026-08-22, replayed through hahod
+    // (modelUsed claude-opus-4-8): a complete verdict: ratify ruling that
+    // carried a real diff_ref, refused only because it arrived fenced in
+    // ```yaml with the ruling fields flattened to the top level beside an empty
+    // `ruling:`. The fixture is the raw bytes, not a paraphrase, so the reply
+    // that actually failed is pinned as a regression.
+    #[test]
+    fn the_sprints52_fenced_and_flattened_reply_parses() {
+        let raw = include_str!("testdata/sprints52_reply.yaml");
+        let doc = parse(raw).expect("the captured fenced+flattened reply must parse");
+        assert_eq!(doc.ruling.verdict, Verdict::Ratify);
+        assert_eq!(doc.ruling.shape_verdict, ShapeVerdict::OnMesh);
+        // the diff_ref the model DID emit must survive the re-nesting, not vanish.
+        assert_eq!(
+            doc.ruling.diff_ref,
+            "a77dc2781c03973bb4ba5b4d06c0498ce9ad5d66"
+        );
+        assert_eq!(
+            doc.ruling.divergences.len(),
+            3,
+            "all three divergences kept"
+        );
     }
 
     #[test]
@@ -245,7 +334,11 @@ mod tests {
             .filter(|l| !l.trim_start().starts_with("diff_ref:"))
             .collect::<Vec<_>>()
             .join("\n")
-            .replacen("  verdict:", "  ledger_entry_id: 2026-01-01/rulings/x.yaml\n  verdict:", 1);
+            .replacen(
+                "  verdict:",
+                "  ledger_entry_id: 2026-01-01/rulings/x.yaml\n  verdict:",
+                1,
+            );
         let err = parse_ledger_entry(&without).unwrap_err();
         assert!(err.contains("diff_ref is empty"), "{err}");
     }
