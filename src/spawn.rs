@@ -72,6 +72,10 @@ fn attribution(inputs: &Inputs) -> String {
 // the single-purpose prompt. everything the judge may consider is IN the
 // prompt; it is instructed to cite only from these materials.
 pub fn build_prompt(inputs: &Inputs) -> String {
+    build_prompt_with(inputs, &instance_id())
+}
+
+pub fn build_prompt_with(inputs: &Inputs, iid: &str) -> String {
     let mut p = String::new();
     p.push_str(
         "You are the judgment gate (T3) defined by ADR-0001. You are NOT the writer \
@@ -111,9 +115,9 @@ pub fn build_prompt(inputs: &Inputs) -> String {
          bounced.\n\n",
     );
 
-    // Captured once: the id also anchors the tail reminder below, and a second
-    // instance_id() call would mint a different id than the header promised.
-    let iid = instance_id();
+    // The id is the caller's: rule() mints it, puts it in the prompt, and
+    // stamps the same value onto the ruling, so the header cannot promise one
+    // id while the ledger records another.
     p.push_str(&format!(
         "== UNDER JUDGMENT ==\nrepo: {}\npr: {}\nhead sha: {}\njudge instance id: {}\n\n",
         inputs.repo_name, inputs.pr_number, inputs.head_sha, iid
@@ -334,13 +338,33 @@ fn judge_reply(cfg: &SpawnCfg, inputs: &Inputs, prompt: &str) -> Result<String> 
 
 // judge -> parse; on refusal, ONE retry with the refusal appended (ratified
 // T0 call); still refused -> absent, loud, nonzero. never a third try.
+// The bookkeeping the HARNESS owns, written over whatever the judge replied.
+// holden assembled the bundle, so it knows the head sha; it minted the instance
+// id; it has a clock. A judge that echoes these correctly adds nothing, and a
+// judge that DROPS one used to cost the whole ruling -- observed repeatedly on
+// large bundles (sprints issue 52), refusing rulings whose judgement was sound.
+// The judgement is the model's; the bookkeeping is ours. ADR-0003 always said
+// the service would stamp these harness-side; this is that, early.
+fn stamp(doc: &mut RulingDoc, inputs: &Inputs, iid: &str) -> Result<String> {
+    doc.ruling.diff_ref = inputs.head_sha.clone();
+    doc.ruling.judge_instance = iid.to_string();
+    doc.ruling.fired_at = chrono::Utc::now();
+    // re-serialise so the ledger's yaml carries the stamped values, not the
+    // reply's: the file on disk and the parsed document must not disagree.
+    Ok(serde_yaml::to_string(doc)?)
+}
+
 pub fn rule(cfg: &SpawnCfg, inputs: &Inputs) -> Result<(RulingDoc, String)> {
-    let prompt = build_prompt(inputs);
+    let iid = instance_id();
+    let prompt = build_prompt_with(inputs, &iid);
 
     let first = judge_reply(cfg, inputs, &prompt)?;
     let yaml = strip_fences(&first).to_string();
     match ruling::parse(&yaml) {
-        Ok(doc) => Ok((doc, yaml)),
+        Ok(mut doc) => {
+            let stamped = stamp(&mut doc, inputs, &iid)?;
+            Ok((doc, stamped))
+        }
         Err(first_err) => {
             let retry_prompt = format!(
                 "{prompt}\n\n== YOUR PREVIOUS REPLY WAS REFUSED ==\n{first_err}\n\
@@ -349,7 +373,10 @@ pub fn rule(cfg: &SpawnCfg, inputs: &Inputs) -> Result<(RulingDoc, String)> {
             let second = judge_reply(cfg, inputs, &retry_prompt)?;
             let yaml2 = strip_fences(&second).to_string();
             match ruling::parse(&yaml2) {
-                Ok(doc) => Ok((doc, yaml2)),
+                Ok(mut doc) => {
+                    let stamped = stamp(&mut doc, inputs, &iid)?;
+                    Ok((doc, stamped))
+                }
                 Err(second_err) => bail!(
                     "ruling ABSENT: refused twice.\n first: {first_err}\n second: {second_err}"
                 ),

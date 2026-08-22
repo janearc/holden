@@ -20,10 +20,20 @@ pub struct RulingDoc {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Ruling {
-    // commit sha or PR url this ruling binds to.
+    // commit sha or PR url this ruling binds to. STAMPED BY THE HARNESS
+    // (spawn::rule) after the reply parses: holden already knows the head sha
+    // it assembled the bundle from, and asking the judge to echo it made a
+    // bookkeeping field the reply could drop -- which it did, repeatedly, on
+    // large bundles (sprints issue 52), refusing rulings whose judgement was
+    // fine. Optional on the wire, required in a ledger entry.
+    #[serde(default)]
     pub diff_ref: String,
-    // ephemeral judge id; never reused across invocations.
+    // ephemeral judge id; never reused. Also harness-stamped: the harness
+    // generates it before the spawn.
+    #[serde(default)]
     pub judge_instance: String,
+    // when the ruling fired. Harness-stamped: the model has no clock.
+    #[serde(default = "Utc::now")]
     pub fired_at: DateTime<Utc>,
     pub verdict: Verdict,
     // every divergence from the design doc, ratified-or-not, with evidence.
@@ -103,11 +113,17 @@ pub fn validate(doc: &RulingDoc, ctx: Context) -> Result<(), Vec<String>> {
     let mut errs = Vec::new();
     let r = &doc.ruling;
 
-    if r.diff_ref.trim().is_empty() {
-        errs.push("diff_ref is empty".into());
-    }
-    if r.judge_instance.trim().is_empty() {
-        errs.push("judge_instance is empty".into());
+    // diff_ref and judge_instance are stamped by the harness after parsing,
+    // so they are only checkable once a ruling is on its way to (or sitting
+    // in) the ledger. An empty one THERE is a real defect: it means the stamp
+    // did not run.
+    if ctx == Context::LedgerEntry {
+        if r.diff_ref.trim().is_empty() {
+            errs.push("diff_ref is empty".into());
+        }
+        if r.judge_instance.trim().is_empty() {
+            errs.push("judge_instance is empty".into());
+        }
     }
     if r.shape_justification.trim().is_empty() {
         errs.push("shape_justification is empty".into());
@@ -193,6 +209,46 @@ pub fn parse_ledger_entry(yaml: &str) -> Result<RulingDoc, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // THE sprints-issue-52 REGRESSION. A judge that drops diff_ref used to
+    // cost the whole ruling: the reply refused, retried, refused again, and a
+    // sound judgement was recorded as ABSENT. The harness knows the sha, so a
+    // missing one is no longer the model's to get wrong -- it parses here and
+    // spawn::stamp writes the real value in.
+    #[test]
+    fn a_judge_reply_without_diff_ref_still_parses() {
+        let without = valid_yaml()
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("diff_ref:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let doc = parse(&without).expect("a reply missing diff_ref must parse; the harness stamps it");
+        assert!(doc.ruling.diff_ref.is_empty(), "unstamped, it is empty rather than invented");
+    }
+
+    #[test]
+    fn a_judge_reply_without_judge_instance_still_parses() {
+        let without = valid_yaml()
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("judge_instance:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        parse(&without).expect("a reply missing judge_instance must parse; the harness stamps it");
+    }
+
+    // ...but an entry that reached the LEDGER without one means the stamp did
+    // not run, and that is a real defect rather than a model's omission.
+    #[test]
+    fn a_ledger_entry_without_diff_ref_is_refused() {
+        let without = valid_yaml()
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("diff_ref:"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replacen("  verdict:", "  ledger_entry_id: 2026-01-01/rulings/x.yaml\n  verdict:", 1);
+        let err = parse_ledger_entry(&without).unwrap_err();
+        assert!(err.contains("diff_ref is empty"), "{err}");
+    }
 
     fn valid_yaml() -> String {
         r#"
