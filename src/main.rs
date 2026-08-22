@@ -87,6 +87,9 @@ struct Args {
     bundle_root: Option<String>,
 }
 
+// the judge's model, named here rather than inherited from a session.
+pub const DEFAULT_JUDGE_MODEL: &str = "claude-opus-4-8";
+
 fn resolve(args: &Args) -> anyhow::Result<Config> {
     Ok(Config {
         // the default is delightd's DefaultControlPort — the documented
@@ -111,12 +114,17 @@ fn resolve(args: &Args) -> anyhow::Result<Config> {
             ".holden/bundles",
         )?,
         judge_cmd: core::pick(args.judge_cmd.clone(), "JUDGE_CMD", "claude"),
-        // model has no default: absent means the CLI's own configured model
-        // (the hahod path refuses absence loudly at spawn).
-        model: args
-            .model
-            .clone()
-            .or_else(|| std::env::var("JUDGE_MODEL").ok()),
+        // the judge NAMES its model. It used to fall through to the CLI's
+        // own configured model, which meant the ruling's cost depended on
+        // whatever the operator's session happened to be set to -- the same
+        // leak --effort closed. Ruled 2026-08-22: opus 4.8, which rules at a
+        // fraction of the 5-series cost and has held every verdict compared
+        // so far. Flag over JUDGE_MODEL over this default.
+        model: Some(core::pick(
+            args.model.clone(),
+            "JUDGE_MODEL",
+            DEFAULT_JUDGE_MODEL,
+        )),
         // effort HAS a default, unlike model: a judge must never inherit the
         // launching shell's CLAUDE_EFFORT, so absence resolves to a named
         // level rather than to "whatever the shell was doing".
