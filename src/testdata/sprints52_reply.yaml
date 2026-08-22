@@ -1,0 +1,127 @@
+```yaml
+ruling:
+diff_ref: "a77dc2781c03973bb4ba5b4d06c0498ce9ad5d66"
+judge_instance: "judge-20260822T142737Z-p98757-s0"
+fired_at: 2026-08-22T14:29:30Z
+verdict: ratify
+divergences:
+- claim: |
+    The constructed child environment for the CLAUDE_CLI backend widens: childEnv's keep
+    set grows from {HOME, PATH, LANG, LC_ALL, TZ} plus OTEL_* to add USER and LOGNAME
+    (internal/hahod/backend/claudecli.go:82-85, post-image), so hahod now passes two more
+    of its own process-environment variables through to a requestor-triggered subprocess.
+    This further departs from the RFC's construct-from-spec rule: "an environment
+    constructed from the spec alone (nothing inherited)" (docs/haho-rfc.md, section 5) and
+    "the environment is constructed from the spec's references and nothing else is
+    inherited" (section 14). The authority — that the agent CLI resolves the credential it
+    owns by account name and answers "Not logged in" without USER, which landed two FAILED
+    jobs in the 2026-08-22 rehearsal (issue 13) — is a field observation in no provided
+    design doc.
+  necessary: true
+  justification: |
+    The passthrough is the same necessity class already ratified for HOME/PATH/locale: the
+    prior firing on this PR recorded the departure as surfaced-not-silent and ratified it on
+    the ground that "the CLI needs a home to find its own credentials and configuration, a
+    PATH to find its runtime, and locale so its output is not mangled ... pinned by a test
+    that would fail if they were dropped" (rulings/2026-08-21T164601Z-haho-pr9.yaml, fourth
+    divergence). USER/LOGNAME extend that exact rationale — the CLI cannot find the
+    credential it owns without its account name — so without them the kind cannot run its
+    own jobs at all, which is the WHOLE_OR_ERROR half-answer this backend refuses to land.
+    The field claim is the not-writable-any-other-way class this ledger ratifies for measured
+    faults (rulings/2026-08-21T020255Z-delightd-pr129.yaml, first divergence;
+    rulings/2026-08-22T064542Z-haho-pr11.yaml, first divergence). The security property the
+    section-14 clause exists for is preserved and stated where it binds: "Identity is not a
+    secret; the credential it unlocks never passes through here"
+    (internal/hahod/backend/claudecli.go:82-83, post-image) — hahod's 1Password-resolved
+    HOLDEN_ANTHROPIC_KEY still matches no name in the keep set and no OTEL_ prefix, so it is
+    still dropped, and the test that pins that (TestClaudeCLIChildDoesNotInheritHahodsSecrets,
+    per rulings/2026-08-21T164601Z-haho-pr9.yaml, first divergence) is untouched and still
+    holds because USER/LOGNAME are not secrets. The departure is surfaced at the binding site
+    — the childEnv comment names both variables, the account-name resolution, the symptom and
+    the issue (internal/hahod/backend/claudecli.go:79-85, post-image) — so it is not silent,
+    which is the repo's own standing requirement ("Divergences from the RFC, surfaced (each
+    is queued work, none is silent)", README.md, "State of the code"). Recorded so the ledger
+    ties this head to issue 13 and the 2026-08-22 rehearsal, which are not among the provided
+    materials.
+- claim: |
+    README.md — untouched by this diff and implicated by no pairing (IMPLICATED DOCUMENTS:
+    none) — is left incomplete about the very set this diff widens. Its divergence-ledger
+    sentence enumerates the constructed child environment as "The child's environment is
+    CONSTRUCTED (`HOME`, `PATH`, locale, and `OTEL_*`) rather than inherited" (README.md,
+    "State of the code"), and after this diff that set also holds USER and LOGNAME, which are
+    neither HOME, PATH, locale (LANG/LC_ALL/TZ) nor OTEL_*. That exact naming is what the
+    prior firing on this PR credited as the surfacing that made the section-14 departure
+    "surfaced rather than silent" — it ratified on the ground that the ledger "names the
+    passthrough set exactly" (rulings/2026-08-21T164601Z-haho-pr9.yaml, first and fourth
+    divergences) — so the surfacing is now under-describing the departure.
+  necessary: false
+  justification: |
+    Not the mandatory-bounce condition and not a falsification: README is neither touched by
+    this diff nor implicated by any pairing (haho carries no .docpairs; the harness reports
+    "(none)"), and the sentence's load-bearing claim — that hahod's own process environment,
+    "which since the 1Password change holds a resolved `HOLDEN_ANTHROPIC_KEY`, is not handed
+    to a requestor-triggered subprocess" (README.md) — stays true post-image, so the
+    enumeration is incomplete, not false. This is the untouched-non-implicated-doc-made-
+    incomplete pattern ratified as necessary:false precedent
+    (rulings/2026-07-05T081342Z-delightd-pr84.yaml, second divergence;
+    rulings/2026-08-22T064853Z-hall-monitor-pr9.yaml, third divergence), and it is unlike the
+    README bounce on this PR (rulings/2026-08-21T162812Z-haho-pr9.yaml, second divergence),
+    which turned on an explicitly exhaustive claim ("The served surface is exactly ...
+    Everything else ... is REFUSED") that the diff itself falsified — the environment
+    parenthetical carries no "exactly"/"only" and the divergence is separately surfaced in
+    the code comment at its binding site, so the change is not silenced by the stale line.
+    But nothing about a two-line keep-set fix required leaving README stale: it is a four-line
+    ledger edit, squarely in reach, and it is the one place a reader learns what the child
+    gets. Recorded so a docs follow-up adds `USER`/`LOGNAME` to README's constructed-env
+    enumeration, keeping the surfacing exact where the section-14 departure's acceptability
+    was staked on it.
+- claim: |
+    LOGNAME rides in on USER's justification but is neither symptom-argued nor test-pinned.
+    The comment states the failure for USER alone — "without USER it answers 'Not logged in'"
+    — while adding LOGNAME to the keep set beside it (internal/hahod/backend/claudecli.go:79-85,
+    post-image), and the test sets and asserts only USER (claudecli_test.go, TestClaudeCLIChild
+    KeepsWhatTheCLINeeds sets `USER` and checks the child sees `rehearsal-user`), so dropping
+    LOGNAME later would pass the suite.
+  necessary: false
+  justification: |
+    Non-blocking: LOGNAME is the conventional POSIX sibling of USER, is likewise non-secret,
+    and adding it belt-and-suspenders costs nothing and cannot leak the credential the
+    section-14 property guards — the same reasoning that keeps USER acceptable. The failure
+    direction if the CLI ever needs LOGNAME and it were dropped is loud, not silent: the job
+    lands FAILED with the exec/"Not logged in" error carried in stderr, the refusal path
+    ratified at rulings/2026-08-21T164601Z-haho-pr9.yaml (shape_justification). Same hand-added-
+    unpinned-value seam this ledger records non-blocking
+    (rulings/2026-07-10T041515Z-delightd-pr115.yaml, third divergence). Recorded so a follow-up
+    either states in the comment why both account-name variables are carried (or that LOGNAME
+    is defensive) and pins it, or drops LOGNAME if only USER is load-bearing.
+shape_verdict: on-mesh
+shape_justification: |
+  One hunk in the function that constructs the child environment plus its test, the smallest
+  correct fix for a measured fault, with the reason written where the next editor meets it —
+  the constraint-stated-where-it-binds register this ledger ratifies by name for this repo's
+  backend work (rulings/2026-08-21T164601Z-haho-pr9.yaml, shape_justification). The comment
+  does the work a comment exists to do rather than restating the map: it names the two
+  variables, the mechanism that made their absence break the kind (the CLI resolves the
+  credential it owns by account name), the exact symptom (the child answers "Not logged in"
+  and exits 1 with nothing on stderr), the observed cost (two FAILED jobs in a second each,
+  2026-08-22 rehearsal, issue 13), and the security distinction that makes the addition safe
+  (identity is not a secret; the credential it unlocks never passes through here). The change
+  preserves every property the prior head was ratified for: the environment is still
+  CONSTRUCTED rather than inherited — the keep set is an explicit allow-list and OTEL_ a named
+  prefix, so `cmd.Env` is never nil and the "inherit everything" trap section 14 forbids stays
+  shut — and the secret-exclusion property is unchanged because USER/LOGNAME match no secret
+  the daemon holds, which the untouched TestClaudeCLIChildDoesNotInheritHahodsSecrets still
+  pins. The keep-half is test-pinned in the same diff: the suite now exports USER and asserts
+  the child sees it (claudecli_test.go), so a regression that drops USER fails loudly rather
+  than reintroducing the rehearsal fault. Blast radius is one function's keep set and its
+  test: no enum, no admission branch, no contract, no wire shape, no route, no hand-edited
+  generated code, no daemon flag. What keeps this from being a clean landing is only the
+  documentation half — README's divergence-ledger enumeration of the constructed environment
+  now omits the two variables this diff adds, and that enumeration is the exact surfacing the
+  section-14 departure's acceptability was staked on — and the unpinned LOGNAME. Both are
+  recorded divergences against an untouched, non-implicated document and a defensive sibling
+  variable, not structural faults, and the repair is a four-line README edit in the same file
+  the prior head already trued for this seam.
+consumer_impact: []
+doc_content_agreement: agree
+```
