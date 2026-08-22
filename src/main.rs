@@ -71,6 +71,11 @@ struct Args {
     /// model override passed to the judge; flag over env JUDGE_MODEL over the CLI's configured model
     #[arg(long)]
     model: Option<String>,
+    /// reasoning effort passed to the judge (low|medium|high|xhigh|max);
+    /// flag over env JUDGE_EFFORT over default high. never inherited from
+    /// the launching shell.
+    #[arg(long)]
+    effort: Option<String>,
     /// delightd control-port base URL for the roster; flag over env JUDGE_DELIGHTD_URL over default
     #[arg(long)]
     delightd_url: Option<String>,
@@ -112,6 +117,10 @@ fn resolve(args: &Args) -> anyhow::Result<Config> {
             .model
             .clone()
             .or_else(|| std::env::var("JUDGE_MODEL").ok()),
+        // effort HAS a default, unlike model: a judge must never inherit the
+        // launching shell's CLAUDE_EFFORT, so absence resolves to a named
+        // level rather than to "whatever the shell was doing".
+        effort: core::pick(args.effort.clone(), "JUDGE_EFFORT", "high"),
         judge_via: core::pick(args.via.clone(), "JUDGE_VIA", "shim"),
         hahod_url: core::pick(
             args.hahod_url.clone(),
@@ -162,6 +171,7 @@ fn main() -> anyhow::Result<()> {
         let spawn_cfg = spawn::SpawnCfg {
             judge_cmd: cfg.judge_cmd.clone(),
             model: cfg.model.clone(),
+            effort: cfg.effort.clone(),
             via: spawn::Via::parse(&cfg.judge_via)?,
             hahod_url: cfg.hahod_url.clone(),
         };

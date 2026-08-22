@@ -42,6 +42,11 @@ pub struct SpawnCfg {
     // (discernment is external in haho v1), and there is no "whatever the
     // CLI is configured with" over the wire.
     pub model: Option<String>,
+    // reasoning effort, always explicit on the shim path (see spawn_once).
+    // the hahod path does not carry it yet: haho's CLAUDE_CLI kind has no
+    // effort parameter, so a hahod judge runs at hahod's own environment
+    // until haho grows one (tracked as a haho issue, not papered over here).
+    pub effort: String,
     pub via: Via,
     pub hahod_url: String,
 }
@@ -267,6 +272,14 @@ fn spawn_once(cfg: &SpawnCfg, inputs: &Inputs, prompt: &str) -> Result<String> {
     if let Some(m) = &cfg.model {
         cmd.args(["--model", m]);
     }
+    // HOW HARD IT THINKS, never inherited. The claude CLI reads CLAUDE_EFFORT
+    // from its environment, and a judge spawned from an interactive shell at
+    // xhigh was ruling at xhigh while nothing in holden said so (measured
+    // 2026-08-22; $7-12 per ruling). The flag wins inside the CLI, but the
+    // variable is scrubbed as well so that a future CLI that prefers the
+    // environment cannot quietly reopen the leak. One fact, one source.
+    cmd.args(["--effort", &cfg.effort]);
+    cmd.env_remove("CLAUDE_EFFORT");
     // prompt via stdin: real diffs blow argv limits.
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -441,6 +454,34 @@ mod tests {
     }
 
     #[test]
+    fn shim_passes_effort_explicitly_and_scrubs_the_shell() {
+        // the stub judge is a shell script that echoes its argv and the
+        // CLAUDE_EFFORT it sees; a real judge never runs here.
+        let dir = std::env::temp_dir().join(format!("holden-effort-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let stub = dir.join("judge.sh");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\nprintf 'args=%s env=%s\\n' \"$*\" \"${CLAUDE_EFFORT:-unset}\"\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let cfg = SpawnCfg {
+            judge_cmd: stub.to_string_lossy().into_owned(),
+            model: None,
+            effort: "medium".into(),
+            via: Via::Shim,
+            hahod_url: "http://127.0.0.1:1".into(),
+        };
+        std::env::set_var("CLAUDE_EFFORT", "xhigh");
+        let out = spawn_once(&cfg, &fake_inputs(), "prompt").unwrap();
+        std::env::remove_var("CLAUDE_EFFORT");
+        assert!(out.contains("--effort medium"), "effort not passed: {out}");
+        assert!(out.contains("env=unset"), "shell effort leaked into the judge: {out}");
+    }
+
+    #[test]
     fn hahod_path_requires_an_explicit_model() {
         // the seam refuses before any network is touched: a JobSpec names
         // its judge, and "whatever the CLI is configured with" does not
@@ -448,6 +489,7 @@ mod tests {
         let cfg = SpawnCfg {
             judge_cmd: "false".into(),
             model: None,
+            effort: "high".into(),
             via: Via::Hahod,
             hahod_url: "http://127.0.0.1:1".into(),
         };

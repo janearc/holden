@@ -23,6 +23,11 @@ pub struct Config {
     pub bundle_root: String,
     pub judge_cmd: String,
     pub model: Option<String>,
+    // how hard the judge thinks. ALWAYS explicit: the shim path passes it
+    // as --effort and scrubs the inherited CLAUDE_EFFORT, because a judge
+    // spawned from an operator shell running at xhigh was silently ruling
+    // at xhigh (measured 2026-08-22: every ruling inherited the shell).
+    pub effort: String,
     // the seam (RFC section 7 step 3): "shim" or "hahod", parsed at spawn.
     pub judge_via: String,
     pub hahod_url: String,
@@ -126,6 +131,7 @@ pub fn run(
             let spawn_cfg = spawn::SpawnCfg {
                 judge_cmd: cfg.judge_cmd.clone(),
                 model: cfg.model.clone(),
+                effort: cfg.effort.clone(),
                 via: spawn::Via::parse(&cfg.judge_via)?,
                 hahod_url: cfg.hahod_url.clone(),
             };
